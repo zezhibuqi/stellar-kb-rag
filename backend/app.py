@@ -8,6 +8,7 @@ from flask_cors import CORS
 
 from auth import auth_bp
 from config import Config
+from docs_api import docs_bp
 from errors import register_error_handlers
 from users_api import users_bp
 
@@ -58,7 +59,8 @@ def create_app(config: Config | None = None) -> Flask:
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
-    # 后续阶段在此注册蓝图：docs_bp / chat_bp
+    app.register_blueprint(docs_bp)
+    # 后续阶段在此注册蓝图：chat_bp
     return app
 
 

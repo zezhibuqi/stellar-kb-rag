@@ -128,3 +128,44 @@ export function updateUserRole(id: number, role: string): Promise<{ id: number; 
     body: JSON.stringify({ role }),
   });
 }
+
+export interface DocInfo {
+  id: number;
+  filename: string;
+  domain: string;
+  chunk_count: number;
+  status: string;
+  uploaded_at: string;
+}
+
+export interface DocStatus {
+  doc_id: number;
+  status: string;
+  chunk_count: number;
+  error?: string;
+}
+
+export interface UploadResponse {
+  doc_id: number;
+  status: string;
+}
+
+export function listDocs(domain?: string): Promise<DocInfo[]> {
+  const query = domain ? `?domain=${encodeURIComponent(domain)}` : "";
+  return request<DocInfo[]>(`/api/docs${query}`);
+}
+
+export function uploadDoc(file: File, domain: string): Promise<UploadResponse> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("domain", domain);
+  return request<UploadResponse>("/api/upload", { method: "POST", body });
+}
+
+export function getDocStatus(docId: number): Promise<DocStatus> {
+  return request<DocStatus>(`/api/docs/${docId}/status`);
+}
+
+export function deleteDoc(docId: number): Promise<{ message: string }> {
+  return request<{ message: string }>(`/api/docs/${docId}`, { method: "DELETE" });
+}
