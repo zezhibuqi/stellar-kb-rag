@@ -1,0 +1,13 @@
+Flask>=3.0
+Flask-CORS
+# 以下为实际解析并验证过的版本（LangChain 0.3.x 系列）
+langchain==0.3.30
+langchain-chroma==0.2.6
+langchain-community==0.3.31
+chromadb==1.5.9
+python-dotenv
+PyJWT
+requests
+openai
+gunicorn
+pytest
