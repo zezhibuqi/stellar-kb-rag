@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import Blueprint, g, jsonify, request
 
 import tasks
+import chroma_store
 from auth import require_admin, require_auth
 from config import Config
 from errors import api_error
@@ -97,7 +98,7 @@ def delete_doc(doc_id: int):
     if doc is None:
         return api_error("文档不存在", "NOT_FOUND", 404)
 
-    # Stage 4：此处补充 chroma_store 按 doc_id 清理向量
+    chroma_store.delete_by_doc_id(doc_id)
     delete_document(doc_id)
 
     # 清理暂存的上传文件（运行时数据，可恢复性由用户重新上传保证）
