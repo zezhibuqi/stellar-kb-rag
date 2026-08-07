@@ -1,6 +1,8 @@
 """Chroma 向量存储：单一 Collection，metadata 过滤，按 doc_id 清理。"""
 
 from chromadb import PersistentClient
+from langchain_chroma import Chroma as LangChainChroma
+from langchain_core.documents import Document
 
 from config import Config
 
@@ -61,3 +63,29 @@ def delete_by_doc_id(doc_id: int) -> None:
 def count_by_doc_id(doc_id: int) -> int:
     result = get_collection().get(where={"doc_id": doc_id})
     return len(result["ids"])
+
+
+def _langchain_collection() -> LangChainChroma:
+    """返回共享同一 PersistentClient 的 LangChain Chroma 封装。"""
+    from embeddings import SiliconFlowEmbeddings
+
+    get_collection()  # 确保 _client 已初始化
+    return LangChainChroma(
+        client=_client,
+        collection_name=COLLECTION_NAME,
+        embedding_function=SiliconFlowEmbeddings(),
+    )
+
+
+def similarity_search(
+    query: str, k: int = 10, where: dict | None = None
+) -> list[Document]:
+    return _langchain_collection().similarity_search(query, k=k, filter=where)
+
+
+def similarity_search_with_scores(
+    query: str, k: int = 10, where: dict | None = None
+) -> list[tuple[Document, float]]:
+    return _langchain_collection().similarity_search_with_relevance_scores(
+        query, k=k, filter=where
+    )

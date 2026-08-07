@@ -4,6 +4,7 @@ import logging
 import time
 
 import requests
+from langchain_core.embeddings import Embeddings
 
 from config import Config
 
@@ -13,6 +14,16 @@ MAX_INPUT_CHARS = 8192  # bge-m3 最大输入 8192 token，按字符数粗略截
 BATCH_SIZE = 32
 RETRY_TIMES = 3
 RETRY_BACKOFF_SECONDS = 1.0
+
+
+class SiliconFlowEmbeddings(Embeddings):
+    """LangChain Embeddings 适配器：复用 SiliconFlow BAAI/bge-m3 客户端。"""
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return embed_texts(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return embed_texts([text])[0]
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
