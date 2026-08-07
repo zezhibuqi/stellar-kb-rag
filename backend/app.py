@@ -6,7 +6,10 @@ from pathlib import Path
 from flask import Flask, jsonify
 from flask_cors import CORS
 
+from auth import auth_bp
 from config import Config
+from errors import register_error_handlers
+from users_api import users_bp
 
 
 def check_components() -> dict:
@@ -41,6 +44,7 @@ def create_app(config: Config | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config or Config)
     CORS(app, origins=app.config["CORS_ORIGINS"])
+    register_error_handlers(app)
 
     @app.get("/api/health")
     def health():
@@ -52,7 +56,9 @@ def create_app(config: Config | None = None) -> Flask:
         )
         return jsonify({"status": status, **components})
 
-    # 后续阶段在此注册蓝图：auth_bp / users_bp / docs_bp / chat_bp
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(users_bp)
+    # 后续阶段在此注册蓝图：docs_bp / chat_bp
     return app
 
 

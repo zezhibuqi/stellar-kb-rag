@@ -13,7 +13,7 @@ from typing import Any
 
 from werkzeug.security import generate_password_hash
 
-from .config import Config
+from config import Config
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
