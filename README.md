@@ -15,7 +15,7 @@
 - **智能问答生成**：基于 DeepSeek 大模型，支持流式（SSE）输出
 - **异步文档入库**：Web 端上传后后台处理，避免超时；支持状态轮询
 - **离线灌库脚本**：批量处理 Markdown 文件，便于初始化数据
-- **管理员面板**：文档上传/删除/列表，用户角色管理
+- **管理员面板**：文档上传/删除/列表，用户创建与角色管理
 
 ---
 
@@ -93,7 +93,7 @@ cd enterprise-kb-qa
 
 #### 安装依赖
 ```bash
-cd backend
+# 在项目根目录执行
 pip install -r requirements.txt
 ```
 
@@ -110,6 +110,7 @@ cp .env.example .env
 
 #### 初始化数据库
 ```bash
+cd backend
 python -c "from models import init_db; init_db()"
 ```
 
@@ -156,7 +157,6 @@ npm run dev
 | 方法 | 路径 | 说明 | 权限 |
 |:---|:---|:---|:---|
 | POST | `/api/auth/login` | 登录 | 公开 |
-| POST | `/api/auth/register` | 注册（默认 employee） | 公开 |
 | GET | `/api/auth/me` | 获取当前用户信息 | 已登录 |
 | POST | `/api/chat` | 问答（支持流式 SSE） | 已登录 |
 | GET | `/api/docs` | 获取文档列表 | 管理员 |
@@ -164,10 +164,11 @@ npm run dev
 | GET | `/api/docs/:id/status` | 查询灌库进度 | 管理员 |
 | DELETE | `/api/docs/:id` | 删除文档及对应向量 | 管理员 |
 | GET | `/api/users` | 用户列表 | 管理员 |
+| POST | `/api/users` | 创建用户 | 管理员 |
 | PUT | `/api/users/:id/role` | 修改用户角色 | 管理员 |
 | GET | `/api/health` | 系统健康检查 | 公开 |
 
-详细接口文档请参考 `项目设计文档.md` 第 6 节。
+详细接口文档请参考 `项目设计文档 V1.7.md` 第 6 节。
 
 ---
 
