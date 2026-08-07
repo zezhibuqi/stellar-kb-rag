@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from werkzeug.security import check_password_hash
 
-from backend.models import (
+from models import (
     close_connection,
     create_document,
     create_user,
