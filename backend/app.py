@@ -7,6 +7,7 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 
 from auth import auth_bp
+from chat_api import chat_bp
 from config import Config
 from docs_api import docs_bp
 from errors import register_error_handlers
@@ -60,7 +61,7 @@ def create_app(config: Config | None = None) -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(docs_bp)
-    # 后续阶段在此注册蓝图：chat_bp
+    app.register_blueprint(chat_bp)
     return app
 
 
