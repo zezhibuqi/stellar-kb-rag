@@ -169,3 +169,82 @@ export function getDocStatus(docId: number): Promise<DocStatus> {
 export function deleteDoc(docId: number): Promise<{ message: string }> {
   return request<{ message: string }>(`/api/docs/${docId}`, { method: "DELETE" });
 }
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatSource {
+  filename: string;
+  domain: string;
+  content_preview: string;
+}
+
+export interface ChatResponse {
+  answer: string;
+  sources: ChatSource[];
+}
+
+export function chat(question: string, history: ChatMessage[]): Promise<ChatResponse> {
+  return request<ChatResponse>("/api/chat", {
+    method: "POST",
+    body: JSON.stringify({ question, history, stream: false }),
+  });
+}
+
+export async function chatStream(
+  question: string,
+  history: ChatMessage[],
+  onToken: (token: string) => void,
+  onDone: (sources: ChatSource[]) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE}/api/chat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ question, history, stream: true }),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    let error: ApiError = { error: `请求失败（HTTP ${response.status}）` };
+    try {
+      error = (await response.json()) as ApiError;
+    } catch {
+      // 非 JSON 响应体时保留默认错误信息
+    }
+    throw new ApiRequestError(response.status, error.error, error.code);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let separator: number;
+    while ((separator = buffer.indexOf("\n\n")) >= 0) {
+      const raw = buffer.slice(0, separator);
+      buffer = buffer.slice(separator + 2);
+      if (!raw.startsWith("data: ")) continue;
+      try {
+        const event = JSON.parse(raw.slice(6)) as Record<string, unknown>;
+        if (typeof event.token === "string") {
+          onToken(event.token);
+        }
+        if (event.done) {
+          onDone((event.sources as ChatSource[]) ?? []);
+        }
+      } catch {
+        // 忽略无法解析的事件
+      }
+    }
+  }
+}
