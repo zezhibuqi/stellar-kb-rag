@@ -5,6 +5,8 @@ import time
 
 import pytest
 
+import chroma_store
+import embeddings
 import tasks
 from app import create_app
 from models import get_connection
@@ -15,6 +17,16 @@ def client():
     app = create_app()
     app.config["TESTING"] = True
     return app.test_client()
+
+
+@pytest.fixture(autouse=True)
+def _mock_embeddings(monkeypatch):
+    """默认用假向量跑通流水线；需要放慢或失败的用例自行覆盖。"""
+    monkeypatch.setattr(
+        embeddings,
+        "embed_texts",
+        lambda texts: [[0.1] * 1024 for _ in texts],
+    )
 
 
 def _login(client, username: str = "admin", password: str = "123456") -> str:
@@ -53,7 +65,12 @@ def _poll_status(client, headers: dict, doc_id: int, timeout: float = 10.0):
     raise AssertionError(f"状态未在超时前终结：{statuses}")
 
 
-def test_upload_status_flow_and_chunk_count(client):
+def test_upload_status_flow_and_chunk_count(client, monkeypatch):
+    def slow_embed(texts):
+        time.sleep(0.1)
+        return [[0.1] * 1024 for _ in texts]
+
+    monkeypatch.setattr(embeddings, "embed_texts", slow_embed)
     headers = _admin_headers(client)
     content = "line1\nline2\nline3\nline4"
     resp = _upload(client, headers, content=content)
@@ -63,11 +80,11 @@ def test_upload_status_flow_and_chunk_count(client):
 
     data, statuses = _poll_status(client, headers, doc_id)
     assert data["status"] == "completed"
-    assert data["chunk_count"] == 4
+    assert data["chunk_count"] == 1
     assert "processing" in statuses, f"应观察到 processing 中间态：{statuses}"
 
     rows = client.get("/api/docs?domain=finance", headers=headers).get_json()
-    assert [row for row in rows if row["id"] == doc_id][0]["chunk_count"] == 4
+    assert [row for row in rows if row["id"] == doc_id][0]["chunk_count"] == 1
 
 
 def test_upload_validations(client):
@@ -95,7 +112,11 @@ def test_failure_sets_failed_with_error(client, monkeypatch):
 
 
 def test_delete_during_processing_aborts(client, monkeypatch):
-    monkeypatch.setattr(tasks, "PROCESS_SLEEP_SECONDS", 0.8)
+    def slow_embed(texts):
+        time.sleep(0.8)
+        return [[0.1] * 1024 for _ in texts]
+
+    monkeypatch.setattr(embeddings, "embed_texts", slow_embed)
     headers = _admin_headers(client)
     resp = _upload(client, headers)
     doc_id = resp.get_json()["doc_id"]
@@ -116,6 +137,7 @@ def test_delete_during_processing_aborts(client, monkeypatch):
     rows = client.get("/api/docs", headers=headers).get_json()
     assert all(row["id"] != doc_id for row in rows)
     assert client.get(f"/api/docs/{doc_id}/status", headers=headers).status_code == 404
+    assert chroma_store.count_by_doc_id(doc_id) == 0
 
 
 def test_delete_missing_document_404(client):

@@ -22,15 +22,21 @@ backend/data/*
 !backend/data/.gitkeep
 !backend/data/chroma/
 !backend/data/chroma/.gitkeep
+backend/data/chroma/*
+!backend/data/chroma/.gitkeep
 !backend/data/uploads/
 !backend/data/uploads/.gitkeep
 !backend/data/uploads/*/
+!backend/data/uploads/*/.gitkeep
+backend/data/uploads/*/*
 !backend/data/uploads/*/.gitkeep
 
 # 用户提供的原始 Markdown（按领域目录放置，不提交内容）
 backend/markdown_src/*
 !backend/markdown_src/.gitkeep
 !backend/markdown_src/*/
+!backend/markdown_src/*/.gitkeep
+backend/markdown_src/*/*
 !backend/markdown_src/*/.gitkeep
 
 # 编辑器 / 系统
