@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     filename TEXT NOT NULL,
+    source_content TEXT,
     domain_name TEXT NOT NULL,
     chunk_count INTEGER DEFAULT 0,
     uploaded_by INTEGER REFERENCES users(id),
@@ -136,7 +137,20 @@ def init_db() -> None:
     Path(Config.DATABASE_URL).parent.mkdir(parents=True, exist_ok=True)
     with transaction() as cur:
         cur.executescript(SCHEMA)
+    _migrate()
     seed_db()
+
+
+def _migrate() -> None:
+    """幂等迁移：为已有数据库补充新增列。"""
+    conn = get_connection()
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(documents)").fetchall()
+    }
+    if "source_content" not in columns:
+        conn.execute("ALTER TABLE documents ADD COLUMN source_content TEXT")
+        conn.commit()
 
 
 def seed_db() -> None:
@@ -245,6 +259,7 @@ def create_document(
     filename: str,
     domain_name: str,
     uploaded_by: int | None = None,
+    source_content: str | None = None,
 ) -> int:
     """创建文档记录（status=pending）；领域不存在时抛 ValueError。"""
     with transaction() as cur:
@@ -254,9 +269,10 @@ def create_document(
         if domain is None:
             raise ValueError(f"领域不存在：{domain_name}")
         cur.execute(
-            "INSERT INTO documents (filename, domain_name, chunk_count, uploaded_by, status) "
-            "VALUES (?, ?, 0, ?, 'pending')",
-            (filename, domain_name, uploaded_by),
+            "INSERT INTO documents "
+            "(filename, source_content, domain_name, chunk_count, uploaded_by, status) "
+            "VALUES (?, ?, ?, 0, ?, 'pending')",
+            (filename, source_content, domain_name, uploaded_by),
         )
         return int(cur.lastrowid)
 
@@ -286,8 +302,9 @@ def update_document_status(
 def get_document(doc_id: int) -> dict[str, Any] | None:
     with transaction() as cur:
         row = cur.execute(
-            "SELECT id, filename, domain_name, chunk_count, uploaded_by, uploaded_at, "
-            "status, error_message FROM documents WHERE id = ?",
+            "SELECT id, filename, source_content, domain_name, chunk_count, "
+            "uploaded_by, uploaded_at, status, error_message "
+            "FROM documents WHERE id = ?",
             (doc_id,),
         ).fetchone()
         return dict(row) if row else None

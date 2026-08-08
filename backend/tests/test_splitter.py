@@ -15,7 +15,7 @@ def test_pure_text_splits_into_text_chunks():
 def test_pure_table_kept_whole():
     table = "| 型号 | 容量 |\n|---|---|\n| SC-100 | 100Ah |"
     chunks = split_markdown(table)
-    assert chunks == [{"type": "table", "content": table}]
+    assert chunks == [{"type": "table", "content": table, "start_line": 1}]
 
 
 def test_mixed_text_and_table():
@@ -26,6 +26,7 @@ def test_mixed_text_and_table():
     assert "table" in types
     table_chunk = next(chunk for chunk in chunks if chunk["type"] == "table")
     assert table_chunk["content"].startswith("| A | B |")
+    assert table_chunk["start_line"] == 3
 
 
 def test_oversized_table_split_with_header():
@@ -37,6 +38,7 @@ def test_oversized_table_split_with_header():
     for chunk in chunks:
         assert chunk["content"].startswith("| 产品 | 数据 |\n|---|---|\n")
         assert chunk["content"].count("|---|---|") == 1, "分隔行不得重复"
+        assert chunk["start_line"] == 1
 
 
 def test_oversized_header_kept_whole_with_warning(caplog):
@@ -46,6 +48,7 @@ def test_oversized_header_kept_whole_with_warning(caplog):
         chunks = split_markdown(table, chunk_size=100)
     assert len(chunks) == 1
     assert chunks[0]["content"] == table
+    assert chunks[0]["start_line"] == 1
     assert any("表头超过" in record.message for record in caplog.records)
 
 
@@ -54,3 +57,23 @@ def test_table_without_separator_line():
     chunks = split_markdown(table, chunk_size=20)
     assert len(chunks) == 2
     assert all(chunk["type"] == "table" for chunk in chunks)
+
+
+def test_text_chunk_start_line_mapping():
+    content = "标题行\n\n" + "\n".join(
+        f"第{i}行：" + "这是一段很长很长的文本内容。" * 20 for i in range(50)
+    )
+    chunks = split_markdown(content, chunk_size=60, chunk_overlap=10)
+    assert len(chunks) > 1
+    assert chunks[0]["type"] == "text"
+    assert chunks[0]["start_line"] == 1
+    start_lines = [chunk["start_line"] for chunk in chunks]
+    assert all(start_lines[i] <= start_lines[i + 1] for i in range(len(start_lines) - 1))
+    assert start_lines[-1] > start_lines[0]
+
+
+def test_table_start_line_after_text():
+    md = "第一行\n第二行\n| A | B |\n|---|---|\n| 1 | 2 |"
+    chunks = split_markdown(md)
+    table_chunk = next(chunk for chunk in chunks if chunk["type"] == "table")
+    assert table_chunk["start_line"] == 3

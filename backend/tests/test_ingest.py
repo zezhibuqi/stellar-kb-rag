@@ -131,11 +131,13 @@ def test_chroma_upsert_count_delete_and_persistence(monkeypatch):
     )
     chroma_store.reset()
     chunks = [
-        {"type": "text", "content": "文本内容"},
-        {"type": "table", "content": "| A |"},
+        {"type": "text", "content": "文本内容", "start_line": 1},
+        {"type": "table", "content": "| A |", "start_line": 2},
     ]
     assert chroma_store.upsert_chunks(1, "finance", "a.md", chunks) == 2
     assert chroma_store.count_by_doc_id(1) == 2
+    metadatas = chroma_store.get_collection().get(where={"doc_id": 1})["metadatas"]
+    assert {meta["start_line"] for meta in metadatas} == {1, 2}
 
     chroma_store.reset()
     assert chroma_store.count_by_doc_id(1) == 2, "Chroma 应持久化"
@@ -166,6 +168,7 @@ def test_upload_pipeline_ingests_to_chroma(monkeypatch, client):
     assert all(meta["domain"] == "finance" for meta in metadatas)
     assert all(meta["filename"] == "sample.md" for meta in metadatas)
     assert {meta["chunk_type"] for meta in metadatas} == {"text", "table"}
+    assert {meta["start_line"] for meta in metadatas} == {1, 3}
 
 
 def test_delete_document_clears_vectors(monkeypatch, client):

@@ -64,6 +64,10 @@ def build_sources(documents: Sequence) -> list[dict]:
             "filename": doc.metadata.get("filename", ""),
             "domain": doc.metadata.get("domain", ""),
             "content_preview": doc.page_content[:200],
+            "doc_id": doc.metadata.get("doc_id"),
+            "chunk_id": doc.metadata.get("chunk_id"),
+            "chunk_type": doc.metadata.get("chunk_type"),
+            "start_line": doc.metadata.get("start_line"),
         }
         for doc in documents
     ]

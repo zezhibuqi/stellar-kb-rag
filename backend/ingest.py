@@ -27,9 +27,12 @@ def main() -> None:
         raise SystemExit(f"未找到 .md 文件：{args.path}")
 
     for file in files:
-        doc_id = create_document(file.name, args.domain)
+        content = tasks.read_markdown_file(str(file))
+        doc_id = create_document(
+            file.name, args.domain, source_content=content
+        )
         print(f"[{file.name}] 提交灌库 (doc_id={doc_id})")
-        tasks.submit_processing(doc_id, str(file)).result()
+        tasks.submit_processing(doc_id).result()
         doc = get_document(doc_id)
         print(
             f"[{file.name}] status={doc['status']} chunk_count={doc['chunk_count']}"

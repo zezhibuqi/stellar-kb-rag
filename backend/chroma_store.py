@@ -48,6 +48,7 @@ def upsert_chunks(
                 "filename": filename,
                 "chunk_id": i,
                 "chunk_type": chunk["type"],
+                "start_line": chunk.get("start_line", 0),
             }
             for i, chunk in enumerate(chunks)
         ],
