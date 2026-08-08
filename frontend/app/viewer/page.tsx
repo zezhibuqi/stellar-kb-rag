@@ -31,8 +31,10 @@ export default function ViewerPage() {
   const [raw, setRaw] = useState<RawDoc | null>(null);
   const [params, setParams] = useState<URLSearchParams | null>(null);
   const [located, setLocated] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     setParams(new URLSearchParams(window.location.search));
   }, []);
 
@@ -102,6 +104,11 @@ export default function ViewerPage() {
     element.classList.add("source-highlight");
     setTimeout(() => element.classList.remove("source-highlight"), 2200);
   };
+
+  // 纯浏览器交互页面：挂载完成前不渲染，避免 hydration 不一致
+  if (!mounted) {
+    return null;
+  }
 
   if (loading) {
     return (
