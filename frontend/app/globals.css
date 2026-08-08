@@ -72,6 +72,11 @@ a {
   margin: 4px 0;
 }
 
+.markdown-preview a {
+  color: #1677ff;
+  text-decoration: underline;
+}
+
 .markdown-preview ul,
 .markdown-preview ol {
   margin: 4px 0;
