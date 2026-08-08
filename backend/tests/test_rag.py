@@ -44,7 +44,7 @@ def _seed_docs(monkeypatch, *items):
             doc_id,
             domain,
             f"{domain}.md",
-            [{"type": "text", "content": content}],
+            [{"type": "text", "content": content, "start_line": 1}],
         )
 
 
@@ -71,6 +71,10 @@ def test_non_stream_response_structure(monkeypatch, client):
     source = data["sources"][0]
     assert source["filename"] == "finance.md"
     assert source["domain"] == "finance"
+    assert source["doc_id"] == 1
+    assert source["chunk_id"] == 0
+    assert source["chunk_type"] == "text"
+    assert source["start_line"] == 1
     assert len(source["content_preview"]) == 200
 
 

@@ -18,6 +18,7 @@
 - **异步文档入库**：Web 端上传后后台处理，避免超时；支持状态轮询
 - **离线灌库脚本**：批量处理 Markdown 文件，便于初始化数据
 - **管理员面板**：文档上传/删除/列表，用户创建与角色管理
+- **原文查看与定位**：引用来源 Markdown 渲染，一键打开原文档并高亮定位引用片段
 
 ---
 
@@ -45,7 +46,7 @@ stellar-kb-rag/
 │   ├── app.py              # Flask 应用工厂 + 蓝图注册
 │   ├── auth.py             # JWT 认证 + 角色装饰器
 │   ├── users_api.py        # 用户管理接口（仅 admin）
-│   ├── docs_api.py         # 知识库管理接口（上传/列表/状态/删除）
+│   ├── docs_api.py         # 知识库管理接口（上传/列表/状态/删除/原文）
 │   ├── chat_api.py         # 问答接口（非流式 + SSE）
 │   ├── tasks.py            # 后台灌库线程池与真实流水线
 │   ├── splitter.py         # Markdown 切片器（文本/表格）
@@ -59,11 +60,11 @@ stellar-kb-rag/
 │   ├── ingest.py           # 离线灌库 CLI
 │   ├── eval.py             # Golden Set 评测脚本
 │   ├── e2e_demo.py         # 本地端到端联调脚本
-│   ├── data/               # 运行时数据（app.db/chroma/uploads，gitignored）
+│   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（60 个用例）
+│   └── tests/              # 自动化测试（64 个用例）
 ├── frontend/
-│   ├── app/                # login / chat / knowledge / users 页面
+│   ├── app/                # login / chat / knowledge / users / viewer 页面
 │   ├── components/         # LayoutWrapper / ChatBox / SourceCard
 │   └── lib/api.ts          # API 封装（含 SSE 消费）
 ├── docs/                   # ADR、Golden Set、评测报告、联调报告
@@ -76,6 +77,10 @@ stellar-kb-rag/
 ---
 
 ## 快速启动（本地开发）
+
+### 0. 一键启动（Windows）
+
+在项目根目录双击或执行 `start-dev.cmd`：脚本会自动初始化数据库，并分别弹出后端（:5000）与前端（:3000）窗口；若端口已被占用会自动跳过。
 
 ### 1. 环境要求
 
@@ -160,6 +165,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 | GET | `/api/docs` | 获取文档列表 | 管理员 |
 | POST | `/api/upload` | 上传文档（异步灌库，返回 doc_id） | 管理员 |
 | GET | `/api/docs/:id/status` | 查询灌库进度 | 管理员 |
+| GET | `/api/docs/:id/raw` | 获取原文档全文（Markdown） | 已登录且领域可访问 |
 | DELETE | `/api/docs/:id` | 删除文档及对应向量 | 管理员 |
 | GET | `/api/users` | 用户列表 | 管理员 |
 | POST | `/api/users` | 创建用户 | 管理员 |
@@ -173,7 +179,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（60 个用例）
+# 单元/接口/评测逻辑测试（64 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）

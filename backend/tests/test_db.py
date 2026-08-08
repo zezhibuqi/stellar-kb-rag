@@ -40,6 +40,7 @@ def test_schema_tables_and_columns():
         "documents": {
             "id",
             "filename",
+            "source_content",
             "domain_name",
             "chunk_count",
             "uploaded_by",
@@ -135,9 +136,15 @@ def test_user_crud_and_validations():
 
 
 def test_document_crud():
-    doc_id = create_document("2024年报.md", "finance", uploaded_by=1)
+    doc_id = create_document(
+        "2024年报.md",
+        "finance",
+        uploaded_by=1,
+        source_content="# 2024年报\n全文内容",
+    )
     assert get_document(doc_id)["status"] == "pending"
     assert get_document(doc_id)["chunk_count"] == 0
+    assert get_document(doc_id)["source_content"] == "# 2024年报\n全文内容"
 
     assert update_document_status(doc_id, "processing")
     assert get_document(doc_id)["status"] == "processing"
@@ -151,6 +158,7 @@ def test_document_crud():
     assert get_document(doc_id)["error_message"] == "模拟异常"
 
     assert [d["filename"] for d in list_documents("finance")] == ["2024年报.md"]
+    assert "source_content" not in list_documents("finance")[0]
     assert list_documents("product") == []
     assert delete_document(doc_id)
     assert get_document(doc_id) is None

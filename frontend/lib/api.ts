@@ -170,6 +170,10 @@ export function deleteDoc(docId: number): Promise<{ message: string }> {
   return request<{ message: string }>(`/api/docs/${docId}`, { method: "DELETE" });
 }
 
+export function getDocRaw(docId: number): Promise<RawDoc> {
+  return request<RawDoc>(`/api/docs/${docId}/raw`);
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -179,6 +183,16 @@ export interface ChatSource {
   filename: string;
   domain: string;
   content_preview: string;
+  doc_id: number;
+  chunk_id: number;
+  chunk_type: "text" | "table";
+  start_line: number;
+}
+
+export interface RawDoc {
+  filename: string;
+  domain: string;
+  content: string;
 }
 
 export interface ChatResponse {

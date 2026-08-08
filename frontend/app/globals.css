@@ -40,3 +40,63 @@ a {
     color-scheme: dark;
   }
 }
+
+/* Markdown 预览 / 原文档查看样式 */
+.markdown-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid #d9d9d9;
+  padding: 4px 8px;
+}
+
+.markdown-preview code {
+  background: #f5f5f5;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.markdown-preview pre {
+  background: #f5f5f5;
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.markdown-preview p {
+  margin: 4px 0;
+}
+
+.markdown-preview a {
+  color: #1677ff;
+  text-decoration: underline;
+}
+
+.markdown-preview ul,
+.markdown-preview ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.viewer-markdown {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.source-highlight {
+  animation: source-flash 2s ease-out;
+}
+
+@keyframes source-flash {
+  0% {
+    background-color: #fff7e6;
+  }
+  100% {
+    background-color: transparent;
+  }
+}

@@ -11,13 +11,12 @@ import pytest
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-import chroma_store  # noqa: E402
-
 _TEST_DIR = tempfile.mkdtemp(prefix="stellar-kb-test-")
 os.environ["DATABASE_URL"] = os.path.join(_TEST_DIR, "test_app.db")
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-0123456789abcdef0123456789abcdef"
 os.environ["CHROMA_PERSIST_DIR"] = os.path.join(_TEST_DIR, "chroma_placeholder")
 
+import chroma_store  # noqa: E402
 from config import Config  # noqa: E402
 from models import close_connection, init_db  # noqa: E402
 from tasks import wait_idle  # noqa: E402

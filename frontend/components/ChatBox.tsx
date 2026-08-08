@@ -3,6 +3,8 @@
 import { SendOutlined, StopOutlined } from "@ant-design/icons";
 import { Button, Empty, Input, Space, Typography, message } from "antd";
 import { useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import SourceCard from "@/components/SourceCard";
 import {
   ApiRequestError,
@@ -99,11 +101,18 @@ export default function ChatBox() {
                   borderRadius: 8,
                   background: msg.role === "user" ? "#1677ff" : "#f5f5f5",
                   color: msg.role === "user" ? "#fff" : "#000",
-                  whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
                 }}
               >
-                {msg.content}
+                {msg.role === "user" ? (
+                  <span style={{ whiteSpace: "pre-wrap" }}>{msg.content}</span>
+                ) : (
+                  <div className="markdown-preview">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                )}
               </div>
             </div>
           ))}

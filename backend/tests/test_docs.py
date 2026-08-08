@@ -99,7 +99,7 @@ def test_upload_validations(client):
 
 
 def test_failure_sets_failed_with_error(client, monkeypatch):
-    def broken_process(doc_id: int, file_path: str) -> None:
+    def broken_process(doc_id: int) -> None:
         raise RuntimeError("模拟灌库异常")
 
     monkeypatch.setattr(tasks, "_process_document", broken_process)
@@ -151,7 +151,7 @@ def test_concurrent_uploads_max_three_workers(client, monkeypatch):
     max_active = 0
     lock = __import__("threading").Lock()
 
-    def slow_process(doc_id: int, file_path: str) -> None:
+    def slow_process(doc_id: int) -> None:
         nonlocal active, max_active
         with lock:
             active += 1
@@ -174,6 +174,50 @@ def test_concurrent_uploads_max_three_workers(client, monkeypatch):
     for doc_id in doc_ids:
         _poll_status(client, headers, doc_id)
     assert max_active <= 3, f"并发超过 3：{max_active}"
+
+
+def test_raw_endpoint_permissions_and_content(client):
+    headers = _admin_headers(client)
+    content = "## 测试\n原文内容。"
+    resp = _upload(client, headers, content=content)
+    doc_id = resp.get_json()["doc_id"]
+    _poll_status(client, headers, doc_id)
+
+    raw = client.get(f"/api/docs/{doc_id}/raw", headers=headers)
+    assert raw.status_code == 200
+    data = raw.get_json()
+    assert data["filename"] == "sample.md"
+    assert data["domain"] == "finance"
+    assert data["content"] == content
+
+    assert client.get(f"/api/docs/{doc_id}/raw").status_code == 401
+
+    employee = _login(client, "employee")
+    employee_headers = {"Authorization": f"Bearer {employee}"}
+    assert (
+        client.get(f"/api/docs/{doc_id}/raw", headers=employee_headers).status_code
+        == 403
+    )
+
+    assert client.get("/api/docs/99999/raw", headers=headers).status_code == 404
+
+    rows = client.get("/api/docs", headers=headers).get_json()
+    assert "source_content" not in rows[0]
+
+
+def test_raw_endpoint_employee_allowed_domain(client):
+    headers = _admin_headers(client)
+    resp = _upload(client, headers, domain="common", content="公共内容")
+    doc_id = resp.get_json()["doc_id"]
+    _poll_status(client, headers, doc_id)
+
+    employee = _login(client, "employee")
+    raw = client.get(
+        f"/api/docs/{doc_id}/raw",
+        headers={"Authorization": f"Bearer {employee}"},
+    )
+    assert raw.status_code == 200
+    assert raw.get_json()["content"] == "公共内容"
 
 
 def test_non_admin_forbidden_on_docs_apis(client):
