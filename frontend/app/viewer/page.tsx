@@ -5,6 +5,7 @@ import { Button, Card, Spin, Tag, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import { ApiRequestError, getDocRaw, type RawDoc } from "@/lib/api";
 
@@ -66,14 +67,27 @@ export default function ViewerPage() {
     }
 
     const timer = setTimeout(() => {
-      const target = document.querySelector(
-        `[data-source-line="${startLine}"]`
-      ) as HTMLElement | null;
+      const elements = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-source-line]")
+      );
+      let target =
+        elements.find(
+          (element) => Number(element.dataset.sourceLine) === startLine
+        ) ?? null;
+      if (!target) {
+        const previous = elements.filter(
+          (element) => Number(element.dataset.sourceLine) < startLine
+        );
+        if (previous.length > 0) {
+          target = previous[previous.length - 1];
+        }
+      }
       if (target) {
         highlight(target);
       } else {
         const preview = params.get("preview") ?? "";
-        const needle = preview.trim().slice(0, 40);
+        // 原文档可能含 HTML 表格，定位文本需去掉标签后匹配
+        const needle = preview.replace(/<[^>]*>/g, "").trim().slice(0, 40);
         if (needle) {
           const root = document.querySelector(".viewer-markdown");
           if (root) {
@@ -148,7 +162,7 @@ export default function ViewerPage() {
         <div className="viewer-markdown markdown-preview">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
-            rehypePlugins={[addSourceLinePlugin as any]}
+            rehypePlugins={[rehypeRaw, addSourceLinePlugin as any]}
           >
             {raw.content}
           </ReactMarkdown>

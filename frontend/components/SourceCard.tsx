@@ -3,6 +3,7 @@
 import { EyeOutlined } from "@ant-design/icons";
 import { Button, Card, Tag, Typography } from "antd";
 import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import type { ChatSource } from "@/lib/api";
 
@@ -29,7 +30,10 @@ export default function SourceCard({ sources }: { sources: ChatSource[] }) {
                 <Typography.Text strong>{source.filename}</Typography.Text>
               </div>
               <div className="markdown-preview">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw]}
+                >
                   {source.content_preview}
                 </ReactMarkdown>
               </div>
