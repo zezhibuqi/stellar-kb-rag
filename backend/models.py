@@ -245,7 +245,9 @@ def list_users() -> list[dict[str, Any]]:
             "SELECT id, username, display_name, role, is_active, created_at "
             "FROM users ORDER BY id"
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            {**dict(row), "is_active": bool(row["is_active"])} for row in rows
+        ]
 
 
 def update_user_role(user_id: int, role: str) -> bool:

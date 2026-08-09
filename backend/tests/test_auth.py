@@ -280,4 +280,19 @@ def test_list_includes_is_active(client):
     token = _admin_token(client)
     users = client.get("/api/users", headers=_auth_header(token)).get_json()
     assert users
-    assert all("is_active" in user for user in users)
+    assert all(isinstance(user["is_active"], bool) for user in users)
+
+
+def test_list_shows_disabled_after_delete(client):
+    token = _admin_token(client)
+    created = client.post(
+        "/api/users",
+        headers=_auth_header(token),
+        json={"username": "victim", "password": "secret123", "role": "employee"},
+    )
+    victim_id = created.get_json()["id"]
+    client.delete(f"/api/users/{victim_id}", headers=_auth_header(token))
+
+    users = client.get("/api/users", headers=_auth_header(token)).get_json()
+    victim = next(user for user in users if user["id"] == victim_id)
+    assert victim["is_active"] is False

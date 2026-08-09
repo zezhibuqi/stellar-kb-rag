@@ -186,8 +186,8 @@ export default function UsersPage() {
       title: "状态",
       dataIndex: "is_active",
       width: 100,
-      render: (isActive: boolean | undefined) =>
-        isActive === false ? (
+      render: (isActive: boolean | number | undefined) =>
+        !isActive ? (
           <Tag color="red">已停用</Tag>
         ) : (
           <Tag color="green">启用</Tag>
@@ -212,7 +212,7 @@ export default function UsersPage() {
           >
             重置密码
           </Button>
-          {record.is_active === false ? (
+          {!record.is_active ? (
             <Button size="small" type="primary" ghost onClick={() => handleActivate(record)}>
               启用
             </Button>
