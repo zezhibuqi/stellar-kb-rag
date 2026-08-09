@@ -24,6 +24,7 @@ export interface UserInfo {
   id: number;
   username: string;
   role: string;
+  is_active?: boolean;
   display_name?: string | null;
   created_at?: string;
 }
@@ -126,6 +127,29 @@ export function updateUserRole(id: number, role: string): Promise<{ id: number; 
   return request<{ id: number; role: string }>(`/api/users/${id}/role`, {
     method: "PUT",
     body: JSON.stringify({ role }),
+  });
+}
+
+export function deleteUser(id: number): Promise<{ id: number; is_active: boolean }> {
+  return request<{ id: number; is_active: boolean }>(`/api/users/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function activateUser(id: number): Promise<{ id: number; is_active: boolean }> {
+  return request<{ id: number; is_active: boolean }>(`/api/users/${id}/active`, {
+    method: "PUT",
+    body: JSON.stringify({ is_active: true }),
+  });
+}
+
+export function resetUserPassword(
+  id: number,
+  newPassword: string
+): Promise<{ id: number; message: string }> {
+  return request<{ id: number; message: string }>(`/api/users/${id}/password`, {
+    method: "PUT",
+    body: JSON.stringify({ new_password: newPassword }),
   });
 }
 

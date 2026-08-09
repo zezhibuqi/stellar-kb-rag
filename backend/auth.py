@@ -14,7 +14,9 @@ from models import get_user_by_id, get_user_by_username
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 
-def create_token(user_id: int, username: str, role: str) -> str:
+def create_token(
+    user_id: int, username: str, role: str, token_version: int
+) -> str:
     """签发 JWT；密钥长度不足时抛 RuntimeError。"""
     if len(Config.SECRET_KEY) < 32:
         raise RuntimeError("JWT_SECRET_KEY 未配置或长度不足 32 字符")
@@ -22,6 +24,7 @@ def create_token(user_id: int, username: str, role: str) -> str:
         "user_id": user_id,
         "username": username,
         "role": role,
+        "ver": token_version,
         "exp": int(time.time()) + Config.JWT_EXPIRATION_HOURS * 3600,
     }
     return jwt.encode(payload, Config.SECRET_KEY, algorithm="HS256")
@@ -45,6 +48,10 @@ def require_auth(f):
         user = get_user_by_id(payload["user_id"])
         if user is None:
             return api_error("用户不存在", "UNAUTHORIZED", 401)
+        if user.get("is_active") == 0:
+            return api_error("账号已停用", "ACCOUNT_DISABLED", 401)
+        if payload.get("ver", 0) != user.get("token_version", 0):
+            return api_error("登录已失效，请重新登录", "TOKEN_STALE", 401)
         g.user = user
         return f(*args, **kwargs)
 
@@ -69,7 +76,11 @@ def login():
     user = get_user_by_username(username)
     if user is None or not check_password_hash(user["password_hash"], password):
         return api_error("用户名或密码错误", "INVALID_CREDENTIALS", 401)
-    token = create_token(user["id"], user["username"], user["role"])
+    if user.get("is_active") == 0:
+        return api_error("账号已停用", "ACCOUNT_DISABLED", 403)
+    token = create_token(
+        user["id"], user["username"], user["role"], user.get("token_version", 0)
+    )
     return jsonify(
         {
             "token": token,
