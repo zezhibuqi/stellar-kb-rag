@@ -6,9 +6,11 @@ import pytest
 from werkzeug.security import check_password_hash
 
 from models import (
+    activate_user,
     close_connection,
     create_document,
     create_user,
+    deactivate_user,
     delete_document,
     get_allowed_domains,
     get_connection,
@@ -16,6 +18,7 @@ from models import (
     get_user_by_username,
     list_documents,
     list_users,
+    reset_user_password,
     transaction,
     update_document_status,
     update_user_role,
@@ -34,7 +37,16 @@ def test_schema_tables_and_columns():
     assert tables == {"users", "domains", "role_permissions", "documents"}
 
     expected = {
-        "users": {"id", "username", "password_hash", "display_name", "role", "created_at"},
+        "users": {
+            "id",
+            "username",
+            "password_hash",
+            "display_name",
+            "role",
+            "is_active",
+            "token_version",
+            "created_at",
+        },
         "domains": {"id", "name", "display_name"},
         "role_permissions": {"role", "domain_name"},
         "documents": {
@@ -133,6 +145,27 @@ def test_user_crud_and_validations():
     assert update_user_role(user_id, "finance")
     assert get_user_by_username("alice")["role"] == "finance"
     assert not update_user_role(99999, "finance")
+
+
+def test_user_soft_delete_activate_and_reset_password():
+    user_id = create_user("to_manage", "secret123", role="employee")
+    user = get_user_by_username("to_manage")
+    assert user["is_active"] == 1
+    assert user["token_version"] == 0
+
+    assert deactivate_user(user_id)
+    assert get_user_by_username("to_manage")["is_active"] == 0
+    assert activate_user(user_id)
+    assert get_user_by_username("to_manage")["is_active"] == 1
+
+    version_before = get_user_by_username("to_manage")["token_version"]
+    assert reset_user_password(user_id, "newpass123")
+    updated = get_user_by_username("to_manage")
+    assert updated["token_version"] == version_before + 1
+    assert check_password_hash(updated["password_hash"], "newpass123")
+
+    with pytest.raises(ValueError):
+        reset_user_password(user_id, "123")
 
 
 def test_document_crud():

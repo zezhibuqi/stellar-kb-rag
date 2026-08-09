@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     display_name TEXT,
     role TEXT NOT NULL DEFAULT 'employee',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    token_version INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -144,13 +146,25 @@ def init_db() -> None:
 def _migrate() -> None:
     """幂等迁移：为已有数据库补充新增列。"""
     conn = get_connection()
-    columns = {
+    document_columns = {
         row["name"]
         for row in conn.execute("PRAGMA table_info(documents)").fetchall()
     }
-    if "source_content" not in columns:
+    if "source_content" not in document_columns:
         conn.execute("ALTER TABLE documents ADD COLUMN source_content TEXT")
-        conn.commit()
+    user_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    if "is_active" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1"
+        )
+    if "token_version" not in user_columns:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.commit()
 
 
 def seed_db() -> None:
@@ -207,7 +221,8 @@ def create_user(
 def get_user_by_username(username: str) -> dict[str, Any] | None:
     with transaction() as cur:
         row = cur.execute(
-            "SELECT id, username, password_hash, display_name, role, created_at "
+            "SELECT id, username, password_hash, display_name, role, is_active, "
+            "token_version, created_at "
             "FROM users WHERE username = ?",
             (username,),
         ).fetchone()
@@ -217,7 +232,7 @@ def get_user_by_username(username: str) -> dict[str, Any] | None:
 def get_user_by_id(user_id: int) -> dict[str, Any] | None:
     with transaction() as cur:
         row = cur.execute(
-            "SELECT id, username, display_name, role, created_at "
+            "SELECT id, username, display_name, role, is_active, token_version, created_at "
             "FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
@@ -227,7 +242,8 @@ def get_user_by_id(user_id: int) -> dict[str, Any] | None:
 def list_users() -> list[dict[str, Any]]:
     with transaction() as cur:
         rows = cur.execute(
-            "SELECT id, username, display_name, role, created_at FROM users ORDER BY id"
+            "SELECT id, username, display_name, role, is_active, created_at "
+            "FROM users ORDER BY id"
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -238,6 +254,41 @@ def update_user_role(user_id: int, role: str) -> bool:
     with transaction() as cur:
         cur.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
         return cur.rowcount > 0
+
+
+def deactivate_user(user_id: int) -> bool:
+    """软删除：标记账号停用。"""
+    with transaction() as cur:
+        cur.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+        return cur.rowcount > 0
+
+
+def activate_user(user_id: int) -> bool:
+    """恢复启用账号。"""
+    with transaction() as cur:
+        cur.execute("UPDATE users SET is_active = 1 WHERE id = ?", (user_id,))
+        return cur.rowcount > 0
+
+
+def reset_user_password(user_id: int, new_password: str) -> bool:
+    """重置密码并使该用户已签发的 token 全部失效。"""
+    if len(new_password) < 6:
+        raise ValueError("密码长度不能少于 6 位")
+    with transaction() as cur:
+        cur.execute(
+            "UPDATE users SET password_hash = ?, token_version = token_version + 1 "
+            "WHERE id = ?",
+            (generate_password_hash(new_password), user_id),
+        )
+        return cur.rowcount > 0
+
+
+def count_active_admins() -> int:
+    with transaction() as cur:
+        row = cur.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND is_active = 1"
+        ).fetchone()
+        return int(row["c"])
 
 
 def count_admins() -> int:
