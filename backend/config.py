@@ -33,6 +33,7 @@ class Config:
     SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    ROUTER_MODEL = os.getenv("ROUTER_MODEL", "deepseek-v4-flash")
 
     # 数据路径
     CHROMA_PERSIST_DIR = _resolve(os.getenv("CHROMA_PERSIST_DIR", "./backend/data/chroma"))

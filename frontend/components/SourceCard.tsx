@@ -26,7 +26,9 @@ export default function SourceCard({ sources }: { sources: ChatSource[] }) {
           return (
             <Card key={index} size="small">
               <div style={{ marginBottom: 8 }}>
-                <Tag color="blue">{source.domain}</Tag>
+                <Tag color={source.source_type === "database" ? "green" : "blue"}>
+                  {source.source_type === "database" ? "数据库" : source.domain}
+                </Tag>
                 <Typography.Text strong>{source.filename}</Typography.Text>
               </div>
               <div className="markdown-preview">
@@ -37,17 +39,19 @@ export default function SourceCard({ sources }: { sources: ChatSource[] }) {
                   {source.content_preview}
                 </ReactMarkdown>
               </div>
-              <Button
-                type="link"
-                size="small"
-                icon={<EyeOutlined />}
-                href={viewerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ paddingLeft: 0, marginTop: 4 }}
-              >
-                查看原文档
-              </Button>
+              {source.doc_id != null && (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<EyeOutlined />}
+                  href={viewerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ paddingLeft: 0, marginTop: 4 }}
+                >
+                  查看原文档
+                </Button>
+              )}
             </Card>
           );
         })}
