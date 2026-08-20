@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS documents (
     status TEXT DEFAULT 'pending',
     error_message TEXT
 );
+
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_no TEXT UNIQUE NOT NULL,
+    customer_name TEXT NOT NULL,
+    contact TEXT,
+    product_type TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    completed_at TIMESTAMP,
+    payment_method TEXT NOT NULL,
+    total_amount REAL NOT NULL
+);
 """
 
 ROLE_VALUES = ("employee", "finance", "sales", "aftersale", "admin")
@@ -141,6 +154,14 @@ def init_db() -> None:
         cur.executescript(SCHEMA)
     _migrate()
     seed_db()
+    _seed_orders()
+
+
+def _seed_orders() -> None:
+    """写入确定性订单种子数据（幂等）。"""
+    from orders_seed import seed_orders
+
+    seed_orders()
 
 
 def _migrate() -> None:

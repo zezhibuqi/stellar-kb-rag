@@ -7,6 +7,7 @@ import pytest
 
 import chroma_store
 import embeddings
+import order_qa
 import rag
 from app import create_app
 
@@ -26,8 +27,18 @@ def _mock_external(monkeypatch):
         lambda texts: [[0.1] * 1024 for _ in texts],
     )
     monkeypatch.setattr(rag, "rerank_top_n", lambda docs, q, top_n=5: list(docs[:top_n]))
-    monkeypatch.setattr(rag.llm, "invoke", lambda prompt: "模拟回答")
-    monkeypatch.setattr(rag.llm, "stream", lambda prompt: iter(["模", "拟", "流"]))
+    monkeypatch.setattr(rag.llm, "invoke", lambda *a, **k: "模拟回答")
+    monkeypatch.setattr(rag.llm, "stream", lambda *a, **k: iter(["模", "拟", "流"]))
+    monkeypatch.setattr(
+        order_qa,
+        "route_question",
+        lambda question, history=None: {
+            "intent": "knowledge",
+            "filters": {},
+            "aggregation": None,
+            "fallback": False,
+        },
+    )
 
 
 def _login(client, username: str, password: str = "123456"):

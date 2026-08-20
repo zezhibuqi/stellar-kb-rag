@@ -1,0 +1,23 @@
+[
+  {"question": "订单 DD20260315004 的总金额是多少？", "role": "aftersale", "intent": "order", "type": "single", "expected": "17000.00", "mode": "exact"},
+  {"question": "订单 DD20260315004 什么时候完成？", "role": "aftersale", "intent": "order", "type": "single", "expected": "2026-03-20 16:00:00", "mode": "exact"},
+  {"question": "订单 DD20260315004 订购了什么产品？", "role": "aftersale", "intent": "order", "type": "single", "expected": ["SC-100"], "mode": "contains_all"},
+  {"question": "订单 DD20260626001 是什么时候创建的？", "role": "aftersale", "intent": "order", "type": "single", "expected": "2026-06-26 09:07:00", "mode": "exact"},
+  {"question": "张伟客户一共有几笔订单？", "role": "aftersale", "intent": "order", "type": "customer", "expected": "12", "mode": "exact"},
+  {"question": "李娜下过哪些订单？", "role": "aftersale", "intent": "order", "type": "customer", "expected": ["DD20260308001", "DD20260315001", "DD20260408001", "DD20260611001", "DD20260714001"], "mode": "contains_all"},
+  {"question": "2026年3月的订单有几笔？", "role": "aftersale", "intent": "order", "type": "time", "expected": "11", "mode": "exact"},
+  {"question": "用银行转账支付的订单有哪些？", "role": "aftersale", "intent": "order", "type": "payment", "expected": ["DD20260210001", "DD20260226001", "DD20260315003", "DD20260315004", "DD20260401001", "DD20260412001", "DD20260420001", "DD20260429001", "DD20260529001", "DD20260614001", "DD20260629001", "DD20260708001", "DD20260717001"], "mode": "contains_all"},
+  {"question": "用对公转账支付的订单总金额是多少？", "role": "aftersale", "intent": "order", "type": "payment", "expected": "714800.00", "mode": "exact"},
+  {"question": "目前未完成的订单有几笔？", "role": "aftersale", "intent": "order", "type": "status", "expected": "11", "mode": "exact"},
+  {"question": "已完成订单的总金额是多少？", "role": "aftersale", "intent": "order", "type": "status", "expected": "1423550.00", "mode": "exact"},
+  {"question": "所有订单的总金额是多少？", "role": "aftersale", "intent": "order", "type": "aggregation", "expected": "1813050.00", "mode": "exact"},
+  {"question": "所有订单的平均金额是多少？", "role": "aftersale", "intent": "order", "type": "aggregation", "expected": "36261.00", "mode": "exact"},
+  {"question": "订单 DD20260315004 订购了多少件？", "role": "aftersale", "intent": "order", "type": "single", "expected": "20", "mode": "exact"},
+  {"question": "订单 DD20260315004 状态如何？破损商品的退换货流程是什么？", "role": "aftersale", "intent": "mixed", "type": "mixed", "expected": ["DD20260315004", "退换货"], "mode": "contains_all"},
+  {"question": "张伟有几笔订单？售后保修期是多久？", "role": "aftersale", "intent": "mixed", "type": "mixed", "expected": ["张伟", "保修"], "mode": "contains_all"},
+  {"question": "信息安全管理规定中密码长度要求是什么？", "role": "admin", "intent": "knowledge", "type": "knowledge", "expected": ["不少于8位"], "mode": "contains_all"},
+  {"question": "公司的核心价值观是什么？", "role": "admin", "intent": "knowledge", "type": "knowledge", "expected": ["诚信为本"], "mode": "contains_all"},
+  {"question": "公司的企业使命是什么？", "role": "admin", "intent": "knowledge", "type": "knowledge", "expected": ["推动新能源技术发展"], "mode": "contains_all"},
+  {"question": "公司在香港联交所上市的股票代码是多少？", "role": "admin", "intent": "knowledge", "type": "knowledge", "expected": ["03750"], "mode": "contains_all"},
+  {"question": "员工离开工位时锁屏快捷键是什么？", "role": "admin", "intent": "knowledge", "type": "knowledge", "expected": ["Win+L"], "mode": "contains_all"}
+]

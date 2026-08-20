@@ -207,10 +207,11 @@ export interface ChatSource {
   filename: string;
   domain: string;
   content_preview: string;
-  doc_id: number;
-  chunk_id: number;
-  chunk_type: "text" | "table";
-  start_line: number;
+  source_type?: "vector" | "database";
+  doc_id: number | null;
+  chunk_id: number | null;
+  chunk_type: "text" | "table" | null;
+  start_line: number | null;
 }
 
 export interface RawDoc {

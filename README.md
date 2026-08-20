@@ -19,6 +19,7 @@
 - **离线灌库脚本**：批量处理 Markdown 文件，便于初始化数据
 - **管理员面板**：文档上传/删除/列表，用户创建/角色管理/停用启用/重置密码
 - **原文查看与定位**：引用来源 Markdown 渲染，一键打开原文档并高亮定位引用片段
+- **订单结构化问答**：aftersale/admin 可用自然语言精确查询订单（单订单/客户/条件过滤/聚合），结果来自数据库并带“数据库”来源标记
 
 ---
 
@@ -59,10 +60,13 @@ stellar-kb-rag/
 │   ├── config.py           # 配置管理（读取 .env）
 │   ├── ingest.py           # 离线灌库 CLI
 │   ├── eval.py             # Golden Set 评测脚本
+│   ├── eval_orders.py      # 订单结构化问答评测脚本
+│   ├── order_qa.py         # 订单意图路由 + 参数化 SQL 执行器
+│   ├── orders_seed.py      # 订单种子数据（确定性、幂等）
 │   ├── e2e_demo.py         # 本地端到端联调脚本
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（64 个用例）
+│   └── tests/              # 自动化测试（108 个用例）
 ├── frontend/
 │   ├── app/                # login / chat / knowledge / users / viewer 页面
 │   ├── components/         # LayoutWrapper / ChatBox / SourceCard
@@ -182,7 +186,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（64 个用例）
+# 单元/接口/评测逻辑测试（108 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）
@@ -190,9 +194,13 @@ npm.cmd run dev   # 其他平台用 npm run dev
 
 # 检索质量评测（Golden Set 75 条）
 .\.venv\Scripts\python.exe backend\eval.py --golden docs\golden_set.json --report docs\eval_report.md
+
+# 订单结构化问答评测（Golden Set 21 条）
+.\.venv\Scripts\python.exe backend\eval_orders.py --golden docs\golden_orders.json --report docs\eval_orders_report.md
 ```
 
 当前评测结果：总体 Hit Rate 88%、MRR 0.83（达标）；product 领域 66.67%，改进计划见 `docs/eval_report.md`。
+订单结构化问答：答案正确率 95.24%、路由准确率 100%，报告见 `docs/eval_orders_report.md`。
 
 ---
 
