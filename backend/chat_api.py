@@ -1,5 +1,7 @@
 """问答接口：非流式 + SSE 流式（设计文档 6.2 / 7.5）。"""
 
+import json
+
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from auth import require_auth
@@ -36,8 +38,14 @@ def chat():
 
     if stream:
         def generate():
-            for event in result:
-                yield f"data: {event}\n\n"
+            try:
+                for event in result:
+                    yield f"data: {event}\n\n"
+            except Exception:  # noqa: BLE001 - 流式中途失败以 error 事件告知前端
+                error_event = json.dumps(
+                    {"error": "生成失败，请稍后重试"}, ensure_ascii=False
+                )
+                yield f"data: {error_event}\n\n"
 
         return Response(
             stream_with_context(generate()),

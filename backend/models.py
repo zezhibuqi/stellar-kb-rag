@@ -63,6 +63,11 @@ CREATE TABLE IF NOT EXISTS orders (
     payment_method TEXT NOT NULL,
     total_amount REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 ROLE_VALUES = ("employee", "finance", "sales", "aftersale", "admin")
@@ -404,3 +409,25 @@ def delete_document(doc_id: int) -> bool:
     with transaction() as cur:
         cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
         return cur.rowcount > 0
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    """读取应用级设置；表不存在（旧库未迁移）时按未设置处理。"""
+    try:
+        with transaction() as cur:
+            row = cur.execute(
+                "SELECT value FROM app_settings WHERE key = ?", (key,)
+            ).fetchone()
+            return row["value"] if row else default
+    except sqlite3.OperationalError:
+        return default
+
+
+def set_setting(key: str, value: str) -> None:
+    """写入应用级设置（upsert）。"""
+    with transaction() as cur:
+        cur.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )

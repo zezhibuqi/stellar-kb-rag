@@ -41,6 +41,22 @@ export default function ChatBox() {
     let answer = "";
 
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+    const markFailed = (text: string) => {
+      setMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last?.role === "assistant") {
+          next[next.length - 1] = {
+            role: "assistant",
+            content: last.content
+              ? `${last.content}\n\n（${text}）`
+              : text,
+          };
+        }
+        return next;
+      });
+      message.error(text);
+    };
     try {
       await chatStream(
         question,
@@ -54,21 +70,15 @@ export default function ChatBox() {
           });
         },
         (doneSources) => setSources(doneSources),
-        controller.signal
+        controller.signal,
+        (errorText) => markFailed(errorText)
       );
     } catch (error) {
       const aborted = (error as Error).name === "AbortError";
-      setMessages((prev) => {
-        const next = [...prev];
-        if (next[next.length - 1]?.content === "") {
-          next[next.length - 1] = {
-            role: "assistant",
-            content: aborted ? "已停止生成" : "回答失败，请稍后重试",
-          };
-        }
-        return next;
-      });
-      if (!aborted) {
+      if (aborted) {
+        markFailed("已停止生成");
+      } else {
+        markFailed("回答失败，请稍后重试");
         message.error(
           error instanceof ApiRequestError ? error.message : "请求失败，请稍后重试"
         );

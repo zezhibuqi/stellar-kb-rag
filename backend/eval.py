@@ -73,7 +73,7 @@ def generate_report(
         "# RAG 评测报告",
         "",
         f"- 评测日期：{date.today().isoformat()}",
-        "- 数据版本：项目设计文档 V1.7 / 项目开发文档 V1.0",
+        "- 数据版本：项目设计文档 V1.8 / 项目开发文档 V1.0",
         f"- Golden Set：{total_questions} 条（{golden_path}）",
         f"- 目标：Hit Rate ≥ {TARGET_HIT_RATE:.0%}，MRR ≥ {TARGET_MRR:.2f}",
         "",

@@ -11,7 +11,9 @@ from chat_api import chat_bp
 from config import Config
 from docs_api import docs_bp
 from errors import register_error_handlers
+import llm
 from orders_api import orders_bp
+from settings_api import settings_bp
 from users_api import users_bp
 
 
@@ -37,9 +39,15 @@ def check_components() -> dict:
     components["siliconflow_key"] = {
         "status": "configured" if cfg.SILICONFLOW_API_KEY else "missing"
     }
-    components["deepseek_key"] = {
-        "status": "configured" if cfg.DEEPSEEK_API_KEY else "missing"
-    }
+    try:
+        active = llm.get_active_provider()
+        components["llm_provider"] = {
+            "id": active.id,
+            "model": active.model,
+            "status": "configured" if active.configured else "missing",
+        }
+    except Exception as exc:  # noqa: BLE001
+        components["llm_provider"] = {"status": "error", "message": str(exc)}
     return components
 
 
@@ -64,6 +72,7 @@ def create_app(config: Config | None = None) -> Flask:
     app.register_blueprint(docs_bp)
     app.register_blueprint(chat_bp)
     app.register_blueprint(orders_bp)
+    app.register_blueprint(settings_bp)
     return app
 
 
