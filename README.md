@@ -20,6 +20,7 @@
 - **管理员面板**：文档上传/删除/列表，用户创建/角色管理/停用启用/重置密码
 - **原文查看与定位**：引用来源 Markdown 渲染，一键打开原文档并高亮定位引用片段
 - **订单结构化问答**：aftersale/admin 可用自然语言精确查询订单（单订单/客户/条件过滤/聚合），结果来自数据库并带“数据库”来源标记
+- **订单数据页面**：aftersale/admin 可浏览/筛选订单数据库列表（分页、联系方式脱敏）
 
 ---
 
@@ -63,12 +64,13 @@ stellar-kb-rag/
 │   ├── eval_orders.py      # 订单结构化问答评测脚本
 │   ├── order_qa.py         # 订单意图路由 + 参数化 SQL 执行器
 │   ├── orders_seed.py      # 订单种子数据（确定性、幂等）
+│   ├── orders_api.py       # 订单数据列表接口（过滤/分页/脱敏）
 │   ├── e2e_demo.py         # 本地端到端联调脚本
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（108 个用例）
+│   └── tests/              # 自动化测试（116 个用例）
 ├── frontend/
-│   ├── app/                # login / chat / knowledge / users / viewer 页面
+│   ├── app/                # login / chat / knowledge / users / viewer / orders 页面
 │   ├── components/         # LayoutWrapper / ChatBox / SourceCard
 │   └── lib/api.ts          # API 封装（含 SSE 消费）
 ├── docs/                   # ADR、Golden Set、评测报告、联调报告
@@ -177,6 +179,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 | DELETE | `/api/users/:id` | 停用账号（软删除） | 管理员 |
 | PUT | `/api/users/:id/active` | 恢复启用账号 | 管理员 |
 | PUT | `/api/users/:id/password` | 重置密码（旧 token 失效） | 管理员 |
+| GET | `/api/orders` | 订单数据列表（过滤+分页，联系方式脱敏） | aftersale/admin |
 | GET | `/api/health` | 系统健康检查 | 公开 |
 
 详细接口文档请参考 `项目设计文档 V1.7.md` 第 6 节。
@@ -186,7 +189,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（108 个用例）
+# 单元/接口/评测逻辑测试（116 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）

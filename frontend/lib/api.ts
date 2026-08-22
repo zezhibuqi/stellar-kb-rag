@@ -198,6 +198,49 @@ export function getDocRaw(docId: number): Promise<RawDoc> {
   return request<RawDoc>(`/api/docs/${docId}/raw`);
 }
 
+export interface OrderInfo {
+  order_no: string;
+  customer_name: string;
+  contact: string;
+  product_type: string;
+  quantity: number;
+  created_at: string;
+  completed_at: string | null;
+  payment_method: string;
+  total_amount: number;
+  status: "completed" | "pending";
+}
+
+export interface OrderListParams {
+  order_no?: string;
+  customer_name?: string;
+  product_type?: string;
+  payment_method?: string;
+  status?: string;
+  created_from?: string;
+  created_to?: string;
+  page?: number;
+  page_size?: number;
+}
+
+export interface OrderListResponse {
+  items: OrderInfo[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export function listOrders(params: OrderListParams): Promise<OrderListResponse> {
+  const query = new URLSearchParams();
+  (Object.keys(params) as (keyof OrderListParams)[]).forEach((key) => {
+    const value = params[key];
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(key, String(value));
+    }
+  });
+  return request<OrderListResponse>(`/api/orders?${query.toString()}`);
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;

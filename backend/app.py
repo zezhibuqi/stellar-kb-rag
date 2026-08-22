@@ -11,6 +11,7 @@ from chat_api import chat_bp
 from config import Config
 from docs_api import docs_bp
 from errors import register_error_handlers
+from orders_api import orders_bp
 from users_api import users_bp
 
 
@@ -62,6 +63,7 @@ def create_app(config: Config | None = None) -> Flask:
     app.register_blueprint(users_bp)
     app.register_blueprint(docs_bp)
     app.register_blueprint(chat_bp)
+    app.register_blueprint(orders_bp)
     return app
 
 

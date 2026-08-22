@@ -24,7 +24,13 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
-    if ((pathname === "/knowledge" || pathname === "/users") && user.role !== "admin") {
+    const adminOnly = pathname === "/knowledge" || pathname === "/users";
+    const ordersPage = pathname === "/orders";
+    const canViewOrders = user.role === "aftersale" || user.role === "admin";
+    if (adminOnly && user.role !== "admin") {
+      router.replace("/chat");
+    }
+    if (ordersPage && !canViewOrders) {
       router.replace("/chat");
     }
   }, [pathname, router, user]);
@@ -38,6 +44,9 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
 
   const menuItems = [
     { key: "/chat", label: "知识问答" },
+    ...(user.role === "aftersale" || user.role === "admin"
+      ? [{ key: "/orders", label: "订单数据" }]
+      : []),
     ...(user.role === "admin"
       ? [
           { key: "/knowledge", label: "知识库管理" },
