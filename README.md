@@ -70,7 +70,7 @@ stellar-kb-rag/
 │   ├── e2e_demo.py         # 本地端到端联调脚本
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（133 个用例）
+│   └── tests/              # 自动化测试（136 个用例）
 ├── frontend/
 │   ├── app/                # login / chat / knowledge / users / viewer / orders / settings 页面
 │   ├── components/         # LayoutWrapper / ChatBox / SourceCard
@@ -186,14 +186,14 @@ npm.cmd run dev   # 其他平台用 npm run dev
 | GET | `/api/orders` | 订单数据列表（过滤+分页，联系方式脱敏） | aftersale/admin |
 | GET | `/api/health` | 系统健康检查 | 公开 |
 
-详细接口文档请参考 `项目设计文档 V1.7.md` 第 6 节。
+详细接口文档请参考 `项目设计文档 V1.8.md` 第 6 节。
 
 ---
 
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（133 个用例）
+# 单元/接口/评测逻辑测试（136 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）
@@ -213,7 +213,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 
 ## 项目文档
 
-- `项目设计文档 V1.7.md`：需求、架构、接口与数据库设计
+- `项目设计文档 V1.8.md`：需求、架构、接口与数据库设计（含订单结构化问答与模型切换）
 - `项目开发文档-V1.0.md`：Stage 0~8 任务与验收标准
 - `CONTEXT.md`：领域词表
 - `docs/adr/`：架构决策记录（单一 Chroma Collection、管理员创建用户等）
