@@ -241,6 +241,42 @@ export function listOrders(params: OrderListParams): Promise<OrderListResponse> 
   return request<OrderListResponse>(`/api/orders?${query.toString()}`);
 }
 
+export interface ModelProviderInfo {
+  id: string;
+  name: string;
+  platform: string;
+  base_url: string;
+  model: string;
+  api_key_configured: boolean;
+  active: boolean;
+}
+
+export interface ModelSettings {
+  active: string;
+  default: string;
+  providers: ModelProviderInfo[];
+}
+
+export function getModelSettings(): Promise<ModelSettings> {
+  return request<ModelSettings>("/api/settings/model");
+}
+
+export function switchModel(providerId: string): Promise<ModelSettings> {
+  return request<ModelSettings>("/api/settings/model", {
+    method: "PUT",
+    body: JSON.stringify({ provider_id: providerId }),
+  });
+}
+
+export function testModel(
+  providerId: string
+): Promise<{ ok: boolean; provider_id: string; model: string; reply: string }> {
+  return request<{ ok: boolean; provider_id: string; model: string; reply: string }>(
+    "/api/settings/model/test",
+    { method: "POST", body: JSON.stringify({ provider_id: providerId }) }
+  );
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -280,7 +316,8 @@ export async function chatStream(
   history: ChatMessage[],
   onToken: (token: string) => void,
   onDone: (sources: ChatSource[]) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onError?: (error: string) => void
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getToken();
@@ -320,6 +357,9 @@ export async function chatStream(
         const event = JSON.parse(raw.slice(6)) as Record<string, unknown>;
         if (typeof event.token === "string") {
           onToken(event.token);
+        }
+        if (typeof event.error === "string") {
+          onError?.(event.error);
         }
         if (event.done) {
           onDone((event.sources as ChatSource[]) ?? []);

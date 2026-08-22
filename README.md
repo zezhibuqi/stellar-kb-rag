@@ -14,7 +14,8 @@
 - **细粒度权限控制**：5 类角色（普通员工、财务、销售、售后、管理员），按角色自动过滤可访问领域
 - **混合检索增强**：向量检索 + 重排序（Reranker），提升答案准确性
 - **结构化表格处理**：Markdown 表格完整保留，避免切片破坏语义
-- **智能问答生成**：基于 DeepSeek 大模型，支持流式（SSE）输出
+- **智能问答生成**：基于 LLM 生成回答，支持流式（SSE）输出；生成失败显式提示而非静默断流
+- **管理员可切换模型**：预设提供方注册表（DeepSeek / 超算互联网 GLM-5-Base），界面切换当前模型并即时生效，支持连通性测试
 - **异步文档入库**：Web 端上传后后台处理，避免超时；支持状态轮询
 - **离线灌库脚本**：批量处理 Markdown 文件，便于初始化数据
 - **管理员面板**：文档上传/删除/列表，用户创建/角色管理/停用启用/重置密码
@@ -36,7 +37,7 @@
 | | 结构化数据 | SQLite（WAL 模式 + 每线程独立连接） |
 | **AI 模型** | Embedding | `BAAI/bge-m3`（SiliconFlow API，1024 维） |
 | | Reranker | `BAAI/bge-reranker-v2-m3`（自定义封装） |
-| | LLM | `deepseek-v4-flash`（DeepSeek API，流式支持） |
+| | LLM | `deepseek-v4-flash`（DeepSeek）或 `GLM-5-Base`（超算互联网 scnet），管理员界面可切换，流式支持 |
 
 ---
 
@@ -55,7 +56,7 @@ stellar-kb-rag/
 │   ├── embeddings.py       # SiliconFlow Embedding + LangChain 适配
 │   ├── chroma_store.py     # Chroma 单一 Collection 存取
 │   ├── reranker.py         # SiliconFlow Reranker 封装
-│   ├── llm.py              # DeepSeek 客户端
+│   ├── llm.py              # LLM 客户端（预设提供方注册表 + 当前模型解析）
 │   ├── rag.py              # 权限检索 + 重排 + 问答组装
 │   ├── models.py           # SQLite 数据访问层（Schema/种子/CRUD）
 │   ├── config.py           # 配置管理（读取 .env）
@@ -65,12 +66,13 @@ stellar-kb-rag/
 │   ├── order_qa.py         # 订单意图路由 + 参数化 SQL 执行器
 │   ├── orders_seed.py      # 订单种子数据（确定性、幂等）
 │   ├── orders_api.py       # 订单数据列表接口（过滤/分页/脱敏）
+│   ├── settings_api.py     # 模型设置接口（查看/切换/测试，仅 admin）
 │   ├── e2e_demo.py         # 本地端到端联调脚本
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（116 个用例）
+│   └── tests/              # 自动化测试（133 个用例）
 ├── frontend/
-│   ├── app/                # login / chat / knowledge / users / viewer / orders 页面
+│   ├── app/                # login / chat / knowledge / users / viewer / orders / settings 页面
 │   ├── components/         # LayoutWrapper / ChatBox / SourceCard
 │   └── lib/api.ts          # API 封装（含 SSE 消费）
 ├── docs/                   # ADR、Golden Set、评测报告、联调报告
@@ -117,7 +119,9 @@ Copy-Item .env.example .env   # Windows
 必须配置的变量（详见 `.env.example`）：
 - `SILICONFLOW_API_KEY`：硅基流动 API 密钥
 - `DEEPSEEK_API_KEY`：DeepSeek API 密钥
+- `SCNET_API_KEY`：超算互联网（scnet）API 密钥（使用 GLM-5-Base 时必填；不填则该模型在界面中不可切换）
 - `JWT_SECRET_KEY`：随机字符串（≥32 字符）
+- `LLM_PROVIDER`：当前模型提供方默认值（`deepseek` / `scnet`），管理员界面切换后以 DB 设置为准
 
 初始化数据库并启动后端：
 
@@ -189,7 +193,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（116 个用例）
+# 单元/接口/评测逻辑测试（133 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）

@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import order_qa
+import llm
 from models import get_connection
 from rag import answer_question
 
@@ -77,10 +78,12 @@ def _confusion_value(matrix: dict, expected: str, actual: str) -> int:
 def generate_report(golden_path: str, results: dict, report_path: str) -> None:
     total_items = sum(value["total"] for value in results["per_type"].values())
     seed_count = get_connection().execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+    active = llm.get_active_provider()
     lines = [
         "# 订单结构化问答评测报告",
         "",
         f"- 评测日期：{date.today().isoformat()}",
+        f"- 评测模型：{active.name}（{active.model}，{active.platform}）",
         f"- Golden Set：{total_items} 条（{golden_path}）",
         f"- 种子订单数：{seed_count}",
         (

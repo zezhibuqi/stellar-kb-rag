@@ -24,7 +24,8 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
-    const adminOnly = pathname === "/knowledge" || pathname === "/users";
+    const adminOnly =
+      pathname === "/knowledge" || pathname === "/users" || pathname === "/settings";
     const ordersPage = pathname === "/orders";
     const canViewOrders = user.role === "aftersale" || user.role === "admin";
     if (adminOnly && user.role !== "admin") {
@@ -51,6 +52,7 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
       ? [
           { key: "/knowledge", label: "知识库管理" },
           { key: "/users", label: "用户管理" },
+          { key: "/settings", label: "模型设置" },
         ]
       : []),
   ];
