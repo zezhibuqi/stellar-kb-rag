@@ -2,15 +2,15 @@
 
 import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import {
+  Badge,
   Button,
-  Card,
   DatePicker,
+  Divider,
   Form,
   Input,
   Select,
   Space,
   Table,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -127,71 +127,81 @@ export default function OrdersPage() {
       title: "状态",
       dataIndex: "status",
       width: 90,
-      render: (value: "completed" | "pending") =>
-        value === "completed" ? (
-          <Tag color="green">已完成</Tag>
-        ) : (
-          <Tag color="red">未完成</Tag>
-        ),
+      render: (value: "completed" | "pending") => (
+        <Badge
+          status={value === "completed" ? "success" : "warning"}
+          text={value === "completed" ? "已完成" : "未完成"}
+        />
+      ),
     },
   ];
 
   return (
     <LayoutWrapper>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        订单数据
-      </Typography.Title>
-      <Card style={{ marginBottom: 16 }}>
-        <Form form={form} layout="inline">
-          <Space wrap size={8}>
-            <Form.Item name="order_no" label="订单号">
-              <Input placeholder="如 DD20260315004" allowClear style={{ width: 180 }} />
-            </Form.Item>
-            <Form.Item name="customer_name" label="客户">
-              <Input placeholder="客户姓名" allowClear style={{ width: 140 }} />
-            </Form.Item>
-            <Form.Item name="product_type" label="产品">
-              <Select options={PRODUCT_OPTIONS} allowClear placeholder="全部" style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item name="payment_method" label="支付方式">
-              <Select options={PAYMENT_OPTIONS} allowClear placeholder="全部" style={{ width: 120 }} />
-            </Form.Item>
-            <Form.Item name="status" label="状态">
-              <Select options={STATUS_OPTIONS} allowClear placeholder="全部" style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item name="range" label="创建时间">
-              <DatePicker.RangePicker />
-            </Form.Item>
-            <Form.Item>
-              <Space>
-                <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
-                  查询
-                </Button>
-                <Button icon={<ReloadOutlined />} onClick={handleReset}>
-                  重置
-                </Button>
-              </Space>
-            </Form.Item>
-          </Space>
-        </Form>
-      </Card>
-      <Table
-        rowKey="order_no"
-        dataSource={data.items}
-        columns={columns}
-        loading={loading}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data.total,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
-          onChange: (nextPage, nextSize) => {
-            setPage(nextPage);
-            setPageSize(nextSize);
-          },
-        }}
-      />
+      <div className="page-header">
+        <div>
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            订单数据
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            售后业务订单数据库（只读），联系方式已脱敏
+          </Typography.Text>
+        </div>
+      </div>
+      <div className="app-card">
+        <div style={{ padding: "16px 20px 4px" }}>
+          <Form form={form} layout="inline">
+            <Space wrap size={12}>
+              <Form.Item name="order_no" label="订单号">
+                <Input placeholder="如 DD20260315004" allowClear style={{ width: 180 }} />
+              </Form.Item>
+              <Form.Item name="customer_name" label="客户">
+                <Input placeholder="客户姓名" allowClear style={{ width: 140 }} />
+              </Form.Item>
+              <Form.Item name="product_type" label="产品">
+                <Select options={PRODUCT_OPTIONS} allowClear placeholder="全部" style={{ width: 110 }} />
+              </Form.Item>
+              <Form.Item name="payment_method" label="支付方式">
+                <Select options={PAYMENT_OPTIONS} allowClear placeholder="全部" style={{ width: 120 }} />
+              </Form.Item>
+              <Form.Item name="status" label="状态">
+                <Select options={STATUS_OPTIONS} allowClear placeholder="全部" style={{ width: 110 }} />
+              </Form.Item>
+              <Form.Item name="range" label="创建时间">
+                <DatePicker.RangePicker />
+              </Form.Item>
+              <Form.Item>
+                <Space>
+                  <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+                    查询
+                  </Button>
+                  <Button icon={<ReloadOutlined />} onClick={handleReset}>
+                    重置
+                  </Button>
+                </Space>
+              </Form.Item>
+            </Space>
+          </Form>
+        </div>
+        <Divider style={{ margin: "8px 0 0" }} />
+        <Table
+          rowKey="order_no"
+          dataSource={data.items}
+          columns={columns}
+          loading={loading}
+          pagination={{
+            current: page,
+            pageSize,
+            total: data.total,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条`,
+            onChange: (nextPage, nextSize) => {
+              setPage(nextPage);
+              setPageSize(nextSize);
+            },
+          }}
+        />
+      </div>
     </LayoutWrapper>
   );
 }

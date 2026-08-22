@@ -2,6 +2,7 @@
 
 import { PlusOutlined } from "@ant-design/icons";
 import {
+  Badge,
   Button,
   Form,
   Input,
@@ -10,7 +11,6 @@ import {
   Select,
   Space,
   Table,
-  Tag,
   Typography,
   message,
 } from "antd";
@@ -188,9 +188,9 @@ export default function UsersPage() {
       width: 100,
       render: (isActive: boolean | number | undefined) =>
         !isActive ? (
-          <Tag color="red">已停用</Tag>
+          <Badge status="default" text="已停用" />
         ) : (
-          <Tag color="green">启用</Tag>
+          <Badge status="success" text="启用" />
         ),
     },
     {
@@ -236,13 +236,15 @@ export default function UsersPage() {
 
   return (
     <LayoutWrapper>
-      <Space
-        style={{ marginBottom: 16, justifyContent: "space-between", width: "100%" }}
-        align="center"
-      >
-        <Typography.Title level={3} style={{ margin: 0 }}>
-          用户管理
-        </Typography.Title>
+      <div className="page-header">
+        <div>
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            用户管理
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            创建账号、调整角色与停用启用；账号由管理员统一创建，不开放注册
+          </Typography.Text>
+        </div>
         <Button
           type="primary"
           icon={<PlusOutlined />}
@@ -250,14 +252,16 @@ export default function UsersPage() {
         >
           新建用户
         </Button>
-      </Space>
-      <Table
-        rowKey="id"
-        dataSource={sortedUsers}
-        columns={columns}
-        loading={loading}
-        pagination={false}
-      />
+      </div>
+      <div className="app-card" style={{ overflow: "hidden" }}>
+        <Table
+          rowKey="id"
+          dataSource={sortedUsers}
+          columns={columns}
+          loading={loading}
+          pagination={false}
+        />
+      </div>
       <Modal
         title="新建用户"
         open={createModalOpen}

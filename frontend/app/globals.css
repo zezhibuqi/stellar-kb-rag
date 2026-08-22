@@ -1,13 +1,17 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --app-bg: #f6f7f9;
+  --app-border: #eceef2;
+  --app-card-border: #f0f1f4;
+  --app-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --app-text: #1f2329;
+  --app-text-secondary: #5f6570;
+  --app-text-muted: #8f959e;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
 }
 
 html,
@@ -17,17 +21,20 @@ body {
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--app-text);
+  background: var(--app-bg);
+  font-family:
+    var(--font-inter),
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
+  text-rendering: optimizeLegibility;
 }
 
 a {
@@ -35,57 +42,267 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+::selection {
+  background: rgba(22, 119, 255, 0.16);
 }
 
-/* Markdown 预览 / 原文档查看样式 */
-.markdown-preview table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 8px 0;
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-.markdown-preview th,
-.markdown-preview td {
-  border: 1px solid #d9d9d9;
-  padding: 4px 8px;
+::-webkit-scrollbar-thumb {
+  background: #d5d9e0;
+  border-radius: 8px;
 }
 
-.markdown-preview code {
-  background: #f5f5f5;
-  padding: 1px 4px;
-  border-radius: 4px;
-  font-size: 12px;
+::-webkit-scrollbar-thumb:hover {
+  background: #b8bec8;
 }
 
-.markdown-preview pre {
-  background: #f5f5f5;
-  padding: 8px;
-  border-radius: 4px;
-  overflow-x: auto;
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 通用卡片与页头 ---------- */
+
+.app-card {
+  background: #ffffff;
+  border: 1px solid var(--app-card-border);
+  border-radius: 12px;
+  box-shadow: var(--app-shadow);
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.user-dropdown-trigger:hover {
+  background: #f4f6f9;
+}
+
+/* ---------- 聊天 ---------- */
+
+.chat-user-bubble {
+  display: inline-block;
+  max-width: 75%;
+  padding: 9px 14px;
+  background: #eef1f5;
+  border-radius: 12px 12px 4px 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-input-card {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  background: #ffffff;
+  border: 1px solid #dfe3e8;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.05);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.chat-input-card:focus-within {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.1);
+}
+
+.chat-input-card .ant-input {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 7px 0;
+  font-size: 14px;
+}
+
+/* ---------- 引用来源列表 ---------- */
+
+.source-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.source-row:hover {
+  background: #f7f9fc;
+}
+
+.source-row + .source-row {
+  border-top: 1px solid #f3f4f6;
+}
+
+.source-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #f0f5ff;
+  color: #1677ff;
+  font-size: 15px;
+}
+
+.source-icon.database {
+  background: #f0f9eb;
+  color: #52c41a;
+}
+
+.source-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--app-text-muted);
+}
+
+/* ---------- Markdown 排版（聊天回答 / 原文档 / 来源预览） ---------- */
+
+.markdown-preview {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--app-text);
 }
 
 .markdown-preview p {
-  margin: 4px 0;
+  margin: 6px 0;
 }
 
-.markdown-preview a {
-  color: #1677ff;
-  text-decoration: underline;
+.markdown-preview h1,
+.markdown-preview h2,
+.markdown-preview h3,
+.markdown-preview h4 {
+  margin: 18px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.markdown-preview h1 {
+  font-size: 20px;
+}
+
+.markdown-preview h2 {
+  font-size: 18px;
+}
+
+.markdown-preview h3 {
+  font-size: 16px;
+}
+
+.markdown-preview h4 {
+  font-size: 15px;
 }
 
 .markdown-preview ul,
 .markdown-preview ol {
-  margin: 4px 0;
-  padding-left: 20px;
+  margin: 6px 0;
+  padding-left: 22px;
 }
 
+.markdown-preview li {
+  margin: 2px 0;
+}
+
+.markdown-preview table {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.markdown-preview th {
+  padding: 8px 12px;
+  background: #f7f8fa;
+  font-weight: 600;
+  color: #3d4350;
+  text-align: left;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.markdown-preview td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f1f4;
+}
+
+.markdown-preview tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown-preview code {
+  padding: 1px 6px;
+  background: #f4f5f7;
+  border: 1px solid #eceef2;
+  border-radius: 6px;
+  font-size: 0.9em;
+  font-family: var(--font-inter), ui-monospace, "Cascadia Code", Consolas,
+    monospace;
+}
+
+.markdown-preview pre {
+  padding: 12px;
+  background: #f8f9fb;
+  border: 1px solid #eceef2;
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.markdown-preview pre code {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.markdown-preview blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 3px solid #dfe3e8;
+  color: var(--app-text-secondary);
+}
+
+.markdown-preview a {
+  color: #1677ff;
+}
+
+.markdown-preview a:hover {
+  text-decoration: underline;
+}
+
+.markdown-preview hr {
+  margin: 16px 0;
+  border: none;
+  border-top: 1px solid var(--app-border);
+}
+
+.markdown-preview strong {
+  font-weight: 600;
+}
+
+/* ---------- 原文档查看（阅读式排版） ---------- */
+
 .viewer-markdown {
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 15px;
+  line-height: 1.85;
 }
 
 .source-highlight {
