@@ -18,12 +18,25 @@ def scnet_key(monkeypatch):
     llm.PROVIDERS["scnet"].api_key = original
 
 
+@pytest.fixture()
+def no_scnet_key():
+    """临时清除 scnet 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
+    original = llm.PROVIDERS["scnet"].api_key
+    llm.PROVIDERS["scnet"].api_key = ""
+    yield
+    llm.PROVIDERS["scnet"].api_key = original
+
+
 def _fake_client(calls: list, stream: bool = False, reply: str = "ok"):
     def create(**kwargs):
         calls.append(kwargs)
         if stream:
             chunk = SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content="token"))]
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="token"), finish_reason=None
+                    )
+                ]
             )
             return iter([chunk])
         return SimpleNamespace(
@@ -59,9 +72,7 @@ def test_active_provider_falls_back_on_invalid_setting(monkeypatch):
     assert llm.get_active_provider().id == "deepseek"
 
 
-def test_get_client_rejects_missing_key():
-    # 测试环境未配置 SCNET_API_KEY，激活 scnet 后应拒绝创建客户端
-    assert not llm.PROVIDERS["scnet"].api_key
+def test_get_client_rejects_missing_key(no_scnet_key):
     set_setting(llm.SETTING_KEY, "scnet")
     with pytest.raises(RuntimeError, match="API Key 未配置"):
         llm.get_client()
@@ -87,6 +98,46 @@ def test_invoke_json_uses_active_provider_model(monkeypatch, scnet_key):
     result = llm.invoke_json('输出 {"intent": "knowledge"}')
     assert result == {"intent": "knowledge"}
     assert calls[0]["model"] == Config.SCNET_MODEL
+    # scnet（GLM-5-Base）不支持 response_format，应跳过且加大路由 token 预算
+    assert "response_format" not in calls[0]
+    assert calls[0]["max_tokens"] == 2000
+
+
+def test_invoke_json_deepseek_keeps_response_format(monkeypatch):
+    calls: list = []
+    fake = _fake_client(calls, reply='{"intent": "knowledge"}')
+    monkeypatch.setattr(llm, "get_client", lambda provider=None: fake)
+    result = llm.invoke_json('输出 {"intent": "knowledge"}')
+    assert result == {"intent": "knowledge"}
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert calls[0]["max_tokens"] == 300
+
+
+def test_invoke_empty_content_raises(monkeypatch):
+    fake = _fake_client([], reply="")
+    monkeypatch.setattr(llm, "get_client", lambda provider=None: fake)
+    with pytest.raises(RuntimeError, match="未返回内容"):
+        llm.invoke("hi")
+
+
+def test_stream_truncated_without_content_raises(monkeypatch):
+    calls: list = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        chunk = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=None), finish_reason="length"
+                )
+            ]
+        )
+        return iter([chunk])
+
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(llm, "get_client", lambda provider=None: fake)
+    with pytest.raises(RuntimeError, match="截断"):
+        list(llm.stream("hi"))
 
 
 def test_stream_uses_active_provider_model(monkeypatch, scnet_key):

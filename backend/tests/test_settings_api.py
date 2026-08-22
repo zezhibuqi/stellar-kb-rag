@@ -22,6 +22,15 @@ def scnet_key():
     llm.PROVIDERS["scnet"].api_key = original
 
 
+@pytest.fixture()
+def no_scnet_key():
+    """临时清除 scnet 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
+    original = llm.PROVIDERS["scnet"].api_key
+    llm.PROVIDERS["scnet"].api_key = ""
+    yield
+    llm.PROVIDERS["scnet"].api_key = original
+
+
 def _login(client, username: str, password: str = "123456"):
     resp = client.post(
         "/api/auth/login", json={"username": username, "password": password}
@@ -75,9 +84,7 @@ def test_switch_rejects_unknown_provider(client):
     assert resp.status_code == 404
 
 
-def test_switch_rejects_unconfigured_key(client):
-    # 测试环境未配置 SCNET_API_KEY，切换应被拒绝
-    assert not llm.PROVIDERS["scnet"].api_key
+def test_switch_rejects_unconfigured_key(client, no_scnet_key):
     token = _login(client, "admin")
     resp = client.put(
         "/api/settings/model",

@@ -26,6 +26,12 @@ class ModelProvider:
     base_url: str
     model: str
     api_key: str
+    # 思考型模型（如 GLM-5-Base）先输出 reasoning_content 再输出 content：
+    # JSON 路由需要预留推理 token 预算
+    router_max_tokens: int = 300
+    # scnet GLM-5-Base 上 response_format=json_object 会返回乱序文本（finish=abort），
+    # 不支持的能力需在注册表中显式关闭
+    supports_response_format: bool = True
 
     @property
     def configured(self) -> bool:
@@ -49,6 +55,8 @@ def _build_providers() -> dict[str, ModelProvider]:
             base_url=Config.SCNET_BASE_URL,
             model=Config.SCNET_MODEL,
             api_key=Config.SCNET_API_KEY,
+            router_max_tokens=2000,
+            supports_response_format=False,
         ),
     ]
     return {provider.id: provider for provider in providers}
@@ -109,25 +117,35 @@ def invoke(prompt: str, temperature: float | None = None) -> str:
         temperature=temperature,
         max_tokens=Config.LLM_MAX_TOKENS,
     )
-    return response.choices[0].message.content or ""
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError("模型未返回内容（推理可能耗尽 max_tokens，请调大 LLM_MAX_TOKENS）")
+    return content
 
 
-def invoke_json(prompt: str, temperature: float = 0.0, max_tokens: int = 300) -> dict:
-    """JSON 输出调用封装（意图路由用）；兼容不支持 response_format 的端点。"""
+def invoke_json(prompt: str, temperature: float = 0.0, max_tokens: int | None = None) -> dict:
+    """JSON 输出调用封装（意图路由用）；兼容不支持 response_format 的提供方。"""
     provider = get_active_provider()
+    if max_tokens is None:
+        max_tokens = provider.router_max_tokens
     common = {
         "model": provider.model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    try:
-        response = get_client(provider).chat.completions.create(
-            response_format={"type": "json_object"}, **common
-        )
-    except Exception:  # noqa: BLE001 - 兼容端点不支持 response_format
+    if provider.supports_response_format:
+        try:
+            response = get_client(provider).chat.completions.create(
+                response_format={"type": "json_object"}, **common
+            )
+        except Exception:  # noqa: BLE001 - 兼容端点不支持 response_format
+            response = get_client(provider).chat.completions.create(**common)
+    else:
         response = get_client(provider).chat.completions.create(**common)
-    content = response.choices[0].message.content or ""
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError("模型未返回 JSON 内容（推理可能耗尽 max_tokens）")
     return _parse_json_text(content)
 
 
@@ -154,6 +172,15 @@ def stream(prompt: str, temperature: float | None = None):
         max_tokens=Config.LLM_MAX_TOKENS,
         stream=True,
     )
+    emitted = False
+    finish_reason = None
     for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+        if chunk.choices:
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+            if choice.delta and choice.delta.content:
+                emitted = True
+                yield choice.delta.content
+    if not emitted and finish_reason == "length":
+        raise RuntimeError("模型输出被 max_tokens 截断，未生成回答内容")
