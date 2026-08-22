@@ -147,7 +147,20 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
             style={{ height: "100%", borderRight: 0, paddingTop: 8 }}
           />
         </Layout.Sider>
-        <Layout.Content style={{ padding: "24px 28px" }}>{children}</Layout.Content>
+        <Layout.Content
+          style={
+            pathname === "/chat"
+              ? {
+                  height: "calc(100vh - 56px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "hidden",
+                }
+              : { padding: "24px 28px" }
+          }
+        >
+          {children}
+        </Layout.Content>
       </Layout>
     </Layout>
   );
