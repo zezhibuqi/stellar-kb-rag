@@ -130,16 +130,23 @@ export function updateUserRole(id: number, role: string): Promise<{ id: number; 
   });
 }
 
-export function deleteUser(id: number): Promise<{ id: number; is_active: boolean }> {
-  return request<{ id: number; is_active: boolean }>(`/api/users/${id}`, {
-    method: "DELETE",
+export function deactivateUser(
+  id: number
+): Promise<{ id: number; is_active: boolean }> {
+  return request<{ id: number; is_active: boolean }>(`/api/users/${id}/deactivate`, {
+    method: "PUT",
   });
 }
 
 export function activateUser(id: number): Promise<{ id: number; is_active: boolean }> {
-  return request<{ id: number; is_active: boolean }>(`/api/users/${id}/active`, {
+  return request<{ id: number; is_active: boolean }>(`/api/users/${id}/activate`, {
     method: "PUT",
-    body: JSON.stringify({ is_active: true }),
+  });
+}
+
+export function deleteUser(id: number): Promise<{ id: number; deleted: boolean }> {
+  return request<{ id: number; deleted: boolean }>(`/api/users/${id}`, {
+    method: "DELETE",
   });
 }
 

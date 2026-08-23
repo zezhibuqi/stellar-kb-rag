@@ -20,6 +20,7 @@ import {
   ApiRequestError,
   activateUser,
   createUser,
+  deactivateUser,
   deleteUser,
   getStoredUser,
   listUsers,
@@ -133,9 +134,9 @@ export default function UsersPage() {
     }
   };
 
-  const handleDelete = async (user: UserInfo) => {
+  const handleDeactivate = async (user: UserInfo) => {
     try {
-      await deleteUser(user.id);
+      await deactivateUser(user.id);
       message.success(`账号 ${user.username} 已停用`);
       loadUsers();
     } catch (error) {
@@ -153,6 +154,18 @@ export default function UsersPage() {
     } catch (error) {
       message.error(
         error instanceof ApiRequestError ? error.message : "启用账号失败"
+      );
+    }
+  };
+
+  const handleDelete = async (user: UserInfo) => {
+    try {
+      await deleteUser(user.id);
+      message.success(`账号 ${user.username} 已永久删除`);
+      loadUsers();
+    } catch (error) {
+      message.error(
+        error instanceof ApiRequestError ? error.message : "删除账号失败"
       );
     }
   };
@@ -200,7 +213,7 @@ export default function UsersPage() {
     },
     {
       title: "操作",
-      width: 240,
+      width: 250,
       render: (_: unknown, record: UserInfo) => (
         <Space size="small">
           <Button
@@ -212,22 +225,36 @@ export default function UsersPage() {
           >
             重置密码
           </Button>
-          {!record.is_active ? (
-            <Button size="small" type="primary" ghost onClick={() => handleActivate(record)}>
-              启用
-            </Button>
-          ) : (
+          {record.is_active ? (
             <Popconfirm
               title="确认停用该账号？"
-              description="停用后无法登录，可随时恢复启用"
-              onConfirm={() => handleDelete(record)}
+              description="停用后无法登录，可恢复启用或永久删除"
+              onConfirm={() => handleDeactivate(record)}
               okText="停用"
               cancelText="取消"
             >
-              <Button size="small" danger disabled={record.id === current?.id}>
-                删除
+              <Button size="small" disabled={record.id === current?.id}>
+                停用
               </Button>
             </Popconfirm>
+          ) : (
+            <>
+              <Button size="small" type="primary" ghost onClick={() => handleActivate(record)}>
+                启用
+              </Button>
+              <Popconfirm
+                title="确认永久删除该账号？"
+                description="记录将被永久删除且不可恢复，其上传的文档会保留"
+                onConfirm={() => handleDelete(record)}
+                okText="删除"
+                okButtonProps={{ danger: true }}
+                cancelText="取消"
+              >
+                <Button size="small" danger>
+                  删除
+                </Button>
+              </Popconfirm>
+            </>
           )}
         </Space>
       ),
@@ -242,7 +269,7 @@ export default function UsersPage() {
             用户管理
           </Typography.Title>
           <Typography.Text type="secondary">
-            创建账号、调整角色与停用启用；账号由管理员统一创建，不开放注册
+            创建账号、调整角色、停用/启用与永久删除（删除仅对已停用账号可用）；账号由管理员统一创建，不开放注册
           </Typography.Text>
         </div>
         <Button

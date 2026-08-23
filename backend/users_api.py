@@ -1,4 +1,4 @@
-"""用户管理接口（仅 admin）：创建、列表、修改角色。"""
+"""用户管理接口（仅 admin）：创建、列表、修改角色、停用/启用、永久删除。"""
 
 from flask import Blueprint, g, jsonify, request
 
@@ -11,6 +11,7 @@ from models import (
     count_admins,
     create_user,
     deactivate_user,
+    delete_user,
     get_user_by_id,
     list_users,
     reset_user_password,
@@ -65,15 +66,16 @@ def update_role_api(user_id: int):
     return jsonify({"id": target["id"], "role": new_role})
 
 
-@users_bp.delete("/<int:user_id>")
+@users_bp.put("/<int:user_id>/deactivate")
 @require_auth
 @require_admin
-def delete_user_api(user_id: int):
+def deactivate_user_api(user_id: int):
+    """停用账号：不可登录、旧 token 失效，但记录保留、用户名仍占用。"""
     target = get_user_by_id(user_id)
     if target is None:
         return api_error("用户不存在", "NOT_FOUND", 404)
     if target["id"] == g.user["id"]:
-        return api_error("admin 不能删除自己", "ADMIN_SELF_DELETE", 403)
+        return api_error("admin 不能停用自己", "ADMIN_SELF_DEACTIVATE", 403)
     if (
         target.get("is_active") == 1
         and target["role"] == "admin"
@@ -84,18 +86,34 @@ def delete_user_api(user_id: int):
     return jsonify({"id": target["id"], "is_active": False})
 
 
-@users_bp.put("/<int:user_id>/active")
+@users_bp.put("/<int:user_id>/activate")
 @require_auth
 @require_admin
 def activate_user_api(user_id: int):
-    data = request.get_json(silent=True) or {}
-    if data.get("is_active") is not True:
-        return api_error("仅支持恢复启用（is_active=true）", "BAD_REQUEST", 400)
+    """恢复启用停用账号。"""
     target = get_user_by_id(user_id)
     if target is None:
         return api_error("用户不存在", "NOT_FOUND", 404)
     activate_user(user_id)
     return jsonify({"id": target["id"], "is_active": True})
+
+
+@users_bp.delete("/<int:user_id>")
+@require_auth
+@require_admin
+def delete_user_api(user_id: int):
+    """永久删除账号：仅限已停用账号；用户名随之释放，其上传文档保留（上传者置空）。"""
+    target = get_user_by_id(user_id)
+    if target is None:
+        return api_error("用户不存在", "NOT_FOUND", 404)
+    if target["id"] == g.user["id"]:
+        return api_error("admin 不能删除自己", "ADMIN_SELF_DELETE", 403)
+    if target.get("is_active") == 1:
+        return api_error(
+            "仅可删除已停用的账号，请先停用", "NOT_DEACTIVATED", 400
+        )
+    delete_user(user_id)
+    return jsonify({"id": target["id"], "deleted": True})
 
 
 @users_bp.put("/<int:user_id>/password")
