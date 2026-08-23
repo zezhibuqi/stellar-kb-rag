@@ -51,7 +51,7 @@ def test_registry_contains_preset_providers():
     assert set(providers) == {"deepseek", "scnet"}
     assert providers["deepseek"].model == "deepseek-v4-flash"
     assert providers["deepseek"].base_url == Config.DEEPSEEK_BASE_URL
-    assert providers["scnet"].model == Config.SCNET_MODEL
+    assert providers["scnet"].model == "GLM-5-Base"
     assert providers["scnet"].base_url == "https://api.scnet.cn/api/llm/v1"
 
 
@@ -87,7 +87,7 @@ def test_invoke_uses_active_provider_model(monkeypatch, scnet_key):
 
     set_setting(llm.SETTING_KEY, "scnet")
     assert llm.invoke("hi") == "ok"
-    assert calls[1]["model"] == Config.SCNET_MODEL
+    assert calls[1]["model"] == "GLM-5-Base"
 
 
 def test_invoke_json_uses_active_provider_model(monkeypatch, scnet_key):
@@ -97,7 +97,7 @@ def test_invoke_json_uses_active_provider_model(monkeypatch, scnet_key):
     set_setting(llm.SETTING_KEY, "scnet")
     result = llm.invoke_json('输出 {"intent": "knowledge"}')
     assert result == {"intent": "knowledge"}
-    assert calls[0]["model"] == Config.SCNET_MODEL
+    assert calls[0]["model"] == "GLM-5-Base"
     # scnet（GLM-5-Base）不支持 response_format，应跳过且加大路由 token 预算
     assert "response_format" not in calls[0]
     assert calls[0]["max_tokens"] == 2000
@@ -146,5 +146,5 @@ def test_stream_uses_active_provider_model(monkeypatch, scnet_key):
     set_setting(llm.SETTING_KEY, "scnet")
     tokens = list(llm.stream("hi"))
     assert tokens == ["token"]
-    assert calls[0]["model"] == Config.SCNET_MODEL
+    assert calls[0]["model"] == "GLM-5-Base"
     assert calls[0]["stream"] is True

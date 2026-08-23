@@ -53,21 +53,23 @@ def _build_providers() -> dict[str, ModelProvider]:
             name="GLM-5-Base",
             platform="国家超算互联网（scnet）",
             base_url=Config.SCNET_BASE_URL,
-            model=Config.SCNET_MODEL,
+            model="GLM-5-Base",
             api_key=Config.SCNET_API_KEY,
             router_max_tokens=2000,
             supports_response_format=False,
         ),
-        # ── 新增模型提供方示例（三处配套：本注册表 + config.py + .env/.env.example）──
+        # ── 新增模型提供方示例（两处配套：本注册表 + config.py/.env 的密钥与地址）──
         # 以硅基流动（SiliconFlow）平台的 deepseek-ai/DeepSeek-V4-Flash 为例，
-        # 复用已有的 SILICONFLOW_API_KEY（Embedding/Reranker 同平台）：
+        # 复用已有的 SILICONFLOW_API_KEY（Embedding/Reranker 同平台）。
+        # 模型标识直接写在 model 字段（与上方 deepseek 条目一致），不经过环境变量；
+        # 同平台可注册多个模型条目，id 唯一即可，base_url 与 api_key 可复用。
         #
         # ModelProvider(
         #     id="siliconflow",                          # 唯一标识（英文小写）
         #     name="DeepSeek-V4-Flash",                  # /settings 卡片显示名
         #     platform="硅基流动（SiliconFlow）",          # /settings 卡片平台名
         #     base_url=Config.SILICONFLOW_LLM_BASE_URL,
-        #     model=Config.SILICONFLOW_LLM_MODEL,
+        #     model="deepseek-ai/DeepSeek-V4-Flash",     # 平台的模型标识
         #     api_key=Config.SILICONFLOW_LLM_KEY,
         #     # 能力标志（普通对话模型用默认值即可）：
         #     # 思考型模型（先输出 reasoning_content 再输出 content，如 GLM-5-Base）
