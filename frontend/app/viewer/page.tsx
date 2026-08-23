@@ -146,7 +146,7 @@ export default function ViewerPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f6f7f9" }}>
+    <div style={{ minHeight: "100vh", background: "var(--app-bg)" }}>
       <div
         style={{
           position: "sticky",
@@ -156,8 +156,8 @@ export default function ViewerPage() {
           alignItems: "center",
           gap: 12,
           padding: "10px 24px",
-          background: "#ffffff",
-          borderBottom: "1px solid #f0f1f4",
+          background: "var(--app-panel)",
+          borderBottom: "1px solid var(--app-card-border)",
         }}
       >
         <Button

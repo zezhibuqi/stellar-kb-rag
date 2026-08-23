@@ -6,14 +6,17 @@ import {
   FileTextOutlined,
   LogoutOutlined,
   MessageOutlined,
+  MoonOutlined,
   StarFilled,
+  SunOutlined,
   TeamOutlined,
   UserOutlined,
 } from "@ant-design/icons";
-import { Avatar, Dropdown, Layout, Menu, Typography } from "antd";
+import { Avatar, Button, Dropdown, Layout, Menu, Typography } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { clearAuth, getStoredUser, type UserInfo } from "@/lib/api";
+import { useThemeMode } from "@/components/ThemeProvider";
 
 const BRAND_MARK = (
   <div
@@ -38,6 +41,7 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [ready, setReady] = useState(false);
+  const { mode, toggle } = useThemeMode();
 
   useEffect(() => {
     const stored = getStoredUser();
@@ -92,7 +96,7 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
           alignItems: "center",
           justifyContent: "space-between",
           paddingInline: 24,
-          borderBottom: "1px solid #f0f1f4",
+          borderBottom: "1px solid var(--app-card-border)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -107,37 +111,54 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
             企业知识问答
           </Typography.Text>
         </div>
-        <Dropdown
-          menu={{
-            items: [
-              { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: logout },
-            ],
-          }}
-        >
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              cursor: "pointer",
-              padding: "4px 8px",
-              borderRadius: 8,
-              transition: "background 0.15s",
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Button
+            type="text"
+            shape="circle"
+            icon={mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
+            onClick={toggle}
+            title={mode === "dark" ? "切换到亮色模式" : "切换到夜间模式"}
+          />
+          <Dropdown
+            menu={{
+              items: [
+                { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: logout },
+              ],
             }}
-            className="user-dropdown-trigger"
           >
-            <Avatar size={26} icon={<UserOutlined />} style={{ background: "#e8f3ff", color: "#1677ff" }} />
-            <Typography.Text style={{ fontSize: 13 }}>
-              {user.display_name || user.username}
-            </Typography.Text>
-          </span>
-        </Dropdown>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                cursor: "pointer",
+                padding: "4px 8px",
+                borderRadius: 8,
+                transition: "background 0.15s",
+              }}
+              className="user-dropdown-trigger"
+            >
+              <Avatar
+                size={26}
+                icon={<UserOutlined />}
+                style={
+                  mode === "dark"
+                    ? { background: "rgba(55, 148, 255, 0.16)", color: "#3794ff" }
+                    : { background: "#e8f3ff", color: "#1677ff" }
+                }
+              />
+              <Typography.Text style={{ fontSize: 13 }}>
+                {user.display_name || user.username}
+              </Typography.Text>
+            </span>
+          </Dropdown>
+        </div>
       </Layout.Header>
       <Layout>
         <Layout.Sider
           width={216}
           theme="light"
-          style={{ borderRight: "1px solid #f0f1f4" }}
+          style={{ borderRight: "1px solid var(--app-card-border)" }}
         >
           <Menu
             mode="inline"

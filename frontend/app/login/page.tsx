@@ -1,6 +1,6 @@
 "use client";
 
-import { StarFilled } from "@ant-design/icons";
+import { MoonOutlined, StarFilled, SunOutlined } from "@ant-design/icons";
 import { Button, Form, Input, Typography, message } from "antd";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -11,10 +11,12 @@ import {
   setStoredUser,
   setToken,
 } from "@/lib/api";
+import { useThemeMode } from "@/components/ThemeProvider";
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const { mode, toggle } = useThemeMode();
 
   useEffect(() => {
     if (getStoredUser()) {
@@ -46,9 +48,18 @@ export default function LoginPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#f6f7f9",
+        background: "var(--app-bg)",
+        position: "relative",
       }}
     >
+      <Button
+        type="text"
+        shape="circle"
+        icon={mode === "dark" ? <SunOutlined /> : <MoonOutlined />}
+        onClick={toggle}
+        title={mode === "dark" ? "切换到亮色模式" : "切换到夜间模式"}
+        style={{ position: "absolute", top: 20, right: 20 }}
+      />
       <div style={{ width: 392 }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div
