@@ -3,7 +3,7 @@
 基于 Retrieval-Augmented Generation（RAG）的多领域、多角色企业内部知识问答平台。支持财务、规章、产品、售后、公共知识五大领域，通过角色权限隔离数据，提供高质量、可溯源的智能问答服务。
 
 > **毕业设计项目** —— 面向企业真实场景的智能化知识管理解决方案
->
+> 
 > **项目状态**：Stage 0~8 本地开发与全流程联调已完成；线上部署暂缓（约一年后进行）。
 
 ---
@@ -28,17 +28,17 @@
 
 ## 技术栈（版本已锁定）
 
-| 层级 | 组件 | 选型 |
-|:---|:---|:---|
-| **前端** | 框架 | Next.js 14.2 (App Router) + TypeScript |
-| | UI 库 | Ant Design 5.29 |
-| **后端** | Web 框架 | Flask 3.1 + Flask-CORS |
-| | RAG 框架 | LangChain 0.3.30（`langchain-chroma` / `langchain-community`） |
-| | 向量数据库 | Chroma 1.5.9（单一 Collection + metadata 过滤） |
-| | 结构化数据 | SQLite（WAL 模式 + 每线程独立连接） |
-| **AI 模型** | Embedding | `BAAI/bge-m3`（SiliconFlow API，1024 维） |
-| | Reranker | `BAAI/bge-reranker-v2-m3`（自定义封装） |
-| | LLM | `deepseek-v4-flash`（DeepSeek）或 `GLM-5-Base`（超算互联网 scnet），管理员界面可切换，流式支持 |
+| 层级        | 组件        | 选型                                                                     |
+|:--------- |:--------- |:---------------------------------------------------------------------- |
+| **前端**    | 框架        | Next.js 14.2 (App Router) + TypeScript                                 |
+|           | UI 库      | Ant Design 5.29                                                        |
+| **后端**    | Web 框架    | Flask 3.1 + Flask-CORS                                                 |
+|           | RAG 框架    | LangChain 0.3.30（`langchain-chroma` / `langchain-community`）           |
+|           | 向量数据库     | Chroma 1.5.9（单一 Collection + metadata 过滤）                              |
+|           | 结构化数据     | SQLite（WAL 模式 + 每线程独立连接）                                               |
+| **AI 模型** | Embedding | `BAAI/bge-m3`（SiliconFlow API，1024 维）                                  |
+|           | Reranker  | `BAAI/bge-reranker-v2-m3`（自定义封装）                                       |
+|           | LLM       | `deepseek-v4-flash`（DeepSeek）或 `GLM-5-Base`（超算互联网 scnet），管理员界面可切换，流式支持 |
 
 ---
 
@@ -118,6 +118,7 @@ Copy-Item .env.example .env   # Windows
 ```
 
 必须配置的变量（详见 `.env.example`）：
+
 - `SILICONFLOW_API_KEY`：硅基流动 API 密钥
 - `DEEPSEEK_API_KEY`：DeepSeek API 密钥
 - `SCNET_API_KEY`：超算互联网（scnet）API 密钥（使用 GLM-5-Base 时必填；不填则该模型在界面中不可切换）
@@ -154,43 +155,43 @@ npm.cmd run dev   # 其他平台用 npm run dev
 
 系统初始化时会创建以下测试账户（密码均为 `123456`）：
 
-| 用户名 | 角色 | 可访问领域 |
-|:---|:---|:---|
-| `admin` | 管理员 | 全部 |
-| `employee` | 普通员工 | common, regulation |
-| `finance` | 财务 | common, finance, regulation |
-| `sales` | 销售 | common, product, regulation |
-| `aftersale` | 售后 | common, aftersale, regulation |
+| 用户名         | 角色   | 可访问领域                         |
+|:----------- |:---- |:----------------------------- |
+| `admin`     | 管理员  | 全部                            |
+| `employee`  | 普通员工 | common, regulation            |
+| `finance`   | 财务   | common, finance, regulation   |
+| `sales`     | 销售   | common, product, regulation   |
+| `aftersale` | 售后   | common, aftersale, regulation |
 
-> 💡 系统不提供公开注册，用户由管理员在用户管理页创建。生产环境请务必修改默认密码或删除测试账户。
+>  系统不提供公开注册，用户由管理员在用户管理页创建。生产环境请务必修改默认密码或删除测试账户。
 
 ---
 
 ## API 概览
 
-| 方法 | 路径 | 说明 | 权限 |
-|:---|:---|:---|:---|
-| POST | `/api/auth/login` | 登录 | 公开 |
-| GET | `/api/auth/me` | 获取当前用户信息 | 已登录 |
-| POST | `/api/chat` | 问答（支持流式 SSE） | 已登录 |
-| GET | `/api/docs` | 获取文档列表 | 管理员 |
-| POST | `/api/upload` | 上传文档（异步灌库，返回 doc_id） | 管理员 |
-| GET | `/api/docs/:id/status` | 查询灌库进度 | 管理员 |
-| GET | `/api/docs/:id/raw` | 获取原文档全文（Markdown） | 已登录且领域可访问 |
-| DELETE | `/api/docs/:id` | 删除文档及对应向量 | 管理员 |
-| GET | `/api/users` | 用户列表 | 管理员 |
-| POST | `/api/users` | 创建用户 | 管理员 |
-| PUT | `/api/users/:id/role` | 修改用户角色 | 管理员 |
-| PUT | `/api/users/:id/deactivate` | 停用账号 | 管理员 |
-| PUT | `/api/users/:id/activate` | 恢复启用账号 | 管理员 |
-| DELETE | `/api/users/:id` | 永久删除账号（仅限已停用账号） | 管理员 |
-| PUT | `/api/users/:id/password` | 重置他人密码（旧 token 失效） | 管理员 |
-| PUT | `/api/auth/password` | 自助修改密码（验证当前密码，返回新 token） | 登录用户 |
-| GET | `/api/orders` | 订单数据列表（过滤+分页，联系方式脱敏） | aftersale/admin |
-| GET | `/api/settings/model` | 查看模型提供方与当前模型 | 管理员 |
-| PUT | `/api/settings/model` | 切换当前模型 | 管理员 |
-| POST | `/api/settings/model/test` | 模型连通性测试 | 管理员 |
-| GET | `/api/health` | 系统健康检查 | 公开 |
+| 方法     | 路径                          | 说明                       | 权限              |
+|:------ |:--------------------------- |:------------------------ |:--------------- |
+| POST   | `/api/auth/login`           | 登录                       | 公开              |
+| GET    | `/api/auth/me`              | 获取当前用户信息                 | 已登录             |
+| POST   | `/api/chat`                 | 问答（支持流式 SSE）             | 已登录             |
+| GET    | `/api/docs`                 | 获取文档列表                   | 管理员             |
+| POST   | `/api/upload`               | 上传文档（异步灌库，返回 doc_id）     | 管理员             |
+| GET    | `/api/docs/:id/status`      | 查询灌库进度                   | 管理员             |
+| GET    | `/api/docs/:id/raw`         | 获取原文档全文（Markdown）        | 已登录且领域可访问       |
+| DELETE | `/api/docs/:id`             | 删除文档及对应向量                | 管理员             |
+| GET    | `/api/users`                | 用户列表                     | 管理员             |
+| POST   | `/api/users`                | 创建用户                     | 管理员             |
+| PUT    | `/api/users/:id/role`       | 修改用户角色                   | 管理员             |
+| PUT    | `/api/users/:id/deactivate` | 停用账号                     | 管理员             |
+| PUT    | `/api/users/:id/activate`   | 恢复启用账号                   | 管理员             |
+| DELETE | `/api/users/:id`            | 永久删除账号（仅限已停用账号）          | 管理员             |
+| PUT    | `/api/users/:id/password`   | 重置他人密码（旧 token 失效）       | 管理员             |
+| PUT    | `/api/auth/password`        | 自助修改密码（验证当前密码，返回新 token） | 登录用户            |
+| GET    | `/api/orders`               | 订单数据列表（过滤+分页，联系方式脱敏）     | aftersale/admin |
+| GET    | `/api/settings/model`       | 查看模型提供方与当前模型             | 管理员             |
+| PUT    | `/api/settings/model`       | 切换当前模型                   | 管理员             |
+| POST   | `/api/settings/model/test`  | 模型连通性测试                  | 管理员             |
+| GET    | `/api/health`               | 系统健康检查                   | 公开              |
 
 详细接口文档请参考 `项目设计文档 V1.9.md` 第 6 节。
 

@@ -42,7 +42,7 @@ def _build_providers() -> dict[str, ModelProvider]:
     providers = [
         ModelProvider(
             id="deepseek",
-            name="DeepSeek",
+            name="DeepSeek-V4-Flash-0731",
             platform="DeepSeek 开放平台",
             base_url=Config.DEEPSEEK_BASE_URL,
             model="deepseek-v4-flash",
