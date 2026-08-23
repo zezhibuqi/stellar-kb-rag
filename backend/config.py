@@ -35,10 +35,15 @@ class Config:
     DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     SCNET_API_KEY = os.getenv("SCNET_API_KEY", "")
     SCNET_BASE_URL = os.getenv("SCNET_BASE_URL", "https://api.scnet.cn/api/llm/v1")
-    SCNET_MODEL = os.getenv("SCNET_MODEL", "GLM-5-Base")
 
     # 当前模型提供方的默认值（管理员可在界面切换，DB 设置优先）
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")
+
+    # ── 新增 LLM 提供方示例：与此配套还需在 llm.py 的 _build_providers()
+    #    注册 ModelProvider（模型标识直接写在注册表），并在 .env 填写密钥
+    #    （见 .env.example 模板段）。同平台多模型复用同一组密钥与地址即可。──
+    # SILICONFLOW_LLM_KEY = os.getenv("SILICONFLOW_LLM_KEY", "")
+    # SILICONFLOW_LLM_BASE_URL = os.getenv("SILICONFLOW_LLM_BASE_URL", "https://api.siliconflow.cn/v1")
 
     # 数据路径
     CHROMA_PERSIST_DIR = _resolve(os.getenv("CHROMA_PERSIST_DIR", "./backend/data/chroma"))
