@@ -112,6 +112,16 @@ export function getMe(): Promise<UserInfo> {
   return request<UserInfo>("/api/auth/me");
 }
 
+export function changeMyPassword(
+  oldPassword: string,
+  newPassword: string
+): Promise<{ token: string }> {
+  return request<{ token: string }>("/api/auth/password", {
+    method: "PUT",
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  });
+}
+
 export function listUsers(): Promise<UserInfo[]> {
   return request<UserInfo[]>("/api/users");
 }

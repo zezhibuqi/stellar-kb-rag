@@ -370,6 +370,79 @@ def test_duplicate_username_after_disable(client):
     assert duplicate.status_code == 400
 
 
+def test_change_own_password(client):
+    token = _admin_token(client)
+    headers = _auth_header(token)
+    resp = client.put(
+        "/api/auth/password",
+        headers=headers,
+        json={"old_password": "123456", "new_password": "brandnew123"},
+    )
+    assert resp.status_code == 200
+    new_token = resp.get_json()["token"]
+
+    # 旧 token 失效，新 token 可用（当前会话无缝续用）
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    assert client.get("/api/auth/me", headers=_auth_header(new_token)).status_code == 200
+
+    # 旧密码失效、新密码可登录
+    assert _login(client, "admin", "123456").status_code == 401
+    assert _login(client, "admin", "brandnew123").status_code == 200
+
+
+def test_non_admin_can_change_own_password(client):
+    """历史问题回归：非管理员可自助修改密码。"""
+    token = _admin_token(client)
+    created = client.post(
+        "/api/users",
+        headers=_auth_header(token),
+        json={"username": "selfchange", "password": "secret123", "role": "employee"},
+    ).get_json()
+    user_token = _login(client, "selfchange", "secret123").get_json()["token"]
+
+    resp = client.put(
+        "/api/auth/password",
+        headers=_auth_header(user_token),
+        json={"old_password": "secret123", "new_password": "changed456"},
+    )
+    assert resp.status_code == 200
+    assert client.get(
+        "/api/auth/me", headers=_auth_header(resp.get_json()["token"])
+    ).status_code == 200
+    assert _login(client, "selfchange", "changed456").status_code == 200
+
+
+def test_change_password_wrong_old_password(client):
+    token = _admin_token(client)
+    resp = client.put(
+        "/api/auth/password",
+        headers=_auth_header(token),
+        json={"old_password": "wrongpass", "new_password": "brandnew123"},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["code"] == "WRONG_PASSWORD"
+    # 原密码不受影响
+    assert _login(client, "admin", "123456").status_code == 200
+
+
+def test_change_password_too_short(client):
+    token = _admin_token(client)
+    resp = client.put(
+        "/api/auth/password",
+        headers=_auth_header(token),
+        json={"old_password": "123456", "new_password": "123"},
+    )
+    assert resp.status_code == 400
+
+
+def test_change_password_requires_auth(client):
+    resp = client.put(
+        "/api/auth/password",
+        json={"old_password": "whatever", "new_password": "brandnew123"},
+    )
+    assert resp.status_code == 401
+
+
 def test_list_includes_is_active(client):
     token = _admin_token(client)
     users = client.get("/api/users", headers=_auth_header(token)).get_json()
