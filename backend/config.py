@@ -40,6 +40,12 @@ class Config:
     # 当前模型提供方的默认值（管理员可在界面切换，DB 设置优先）
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")
 
+    # ── 新增 LLM 提供方示例：与此配套还需在 llm.py 的 _build_providers()
+    #    注册 ModelProvider，并在 .env 填写密钥（见 .env.example 模板段）──
+    # SILICONFLOW_LLM_KEY = os.getenv("SILICONFLOW_LLM_KEY", "")
+    # SILICONFLOW_LLM_BASE_URL = os.getenv("SILICONFLOW_LLM_BASE_URL", "https://api.siliconflow.cn/v1")
+    # SILICONFLOW_LLM_MODEL = os.getenv("SILICONFLOW_LLM_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
+
     # 数据路径
     CHROMA_PERSIST_DIR = _resolve(os.getenv("CHROMA_PERSIST_DIR", "./backend/data/chroma"))
     DATABASE_URL = _resolve(os.getenv("DATABASE_URL", "./backend/data/app.db"))

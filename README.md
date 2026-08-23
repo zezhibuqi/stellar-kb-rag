@@ -181,13 +181,35 @@ npm.cmd run dev   # 其他平台用 npm run dev
 | GET | `/api/users` | 用户列表 | 管理员 |
 | POST | `/api/users` | 创建用户 | 管理员 |
 | PUT | `/api/users/:id/role` | 修改用户角色 | 管理员 |
-| DELETE | `/api/users/:id` | 停用账号（软删除） | 管理员 |
-| PUT | `/api/users/:id/active` | 恢复启用账号 | 管理员 |
-| PUT | `/api/users/:id/password` | 重置密码（旧 token 失效） | 管理员 |
+| PUT | `/api/users/:id/deactivate` | 停用账号 | 管理员 |
+| PUT | `/api/users/:id/activate` | 恢复启用账号 | 管理员 |
+| DELETE | `/api/users/:id` | 永久删除账号（仅限已停用账号） | 管理员 |
+| PUT | `/api/users/:id/password` | 重置他人密码（旧 token 失效） | 管理员 |
+| PUT | `/api/auth/password` | 自助修改密码（验证当前密码，返回新 token） | 登录用户 |
 | GET | `/api/orders` | 订单数据列表（过滤+分页，联系方式脱敏） | aftersale/admin |
+| GET | `/api/settings/model` | 查看模型提供方与当前模型 | 管理员 |
+| PUT | `/api/settings/model` | 切换当前模型 | 管理员 |
+| POST | `/api/settings/model/test` | 模型连通性测试 | 管理员 |
 | GET | `/api/health` | 系统健康检查 | 公开 |
 
 详细接口文档请参考 `项目设计文档 V1.9.md` 第 6 节。
+
+---
+
+## 新增 LLM 模型提供方
+
+LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理（DeepSeek 与 scnet GLM-5-Base 已内置）。模型设置页面与接口均从注册表动态渲染，**新增模型只需三步、无需改动前端**：
+
+1. **注册提供方**：在 `llm.py` 的 `_build_providers()` 列表中新增一项 `ModelProvider(...)`（文件内有完整注释示例，可参考抄改）；
+2. **添加配置项**：在 `config.py` 中为该平台的密钥、接口地址与模型标识新增环境变量映射（同样有注释示例）；
+3. **配置密钥**：在 `.env` 中填入真实密钥（`.env.example` 有对应模板段），重启后端。
+
+完成后 `/settings` 页面会自动出现新模型卡片，可直接测试连接与切换。
+
+**能力标志提示**（注册表字段，来自 GLM-5-Base 的实测经验）：
+
+- 普通对话模型（DeepSeek、DeepSeek-V4-Flash@SiliconFlow 等）：默认参数即可；
+- **思考型模型**（先输出 `reasoning_content` 再输出 `content`）：路由调用需预留推理预算，设 `router_max_tokens=2000`；若该端点传 `response_format=json_object` 会报错或返回乱码，设 `supports_response_format=False`。判断方法：切换后问一句订单问题，失败时看后端日志与"测试连接"结果定位。
 
 ---
 
