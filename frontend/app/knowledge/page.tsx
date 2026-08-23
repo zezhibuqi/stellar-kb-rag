@@ -2,13 +2,12 @@
 
 import { DeleteOutlined, UploadOutlined } from "@ant-design/icons";
 import {
+  Badge,
   Button,
-  Card,
   Popconfirm,
   Select,
   Space,
   Table,
-  Tag,
   Typography,
   Upload,
   message,
@@ -32,11 +31,11 @@ const DOMAIN_OPTIONS = [
   { value: "common", label: "公共知识" },
 ];
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: "orange",
-  processing: "blue",
-  completed: "green",
-  failed: "red",
+const STATUS_BADGES: Record<string, { status: "default" | "processing" | "success" | "error"; label: string }> = {
+  pending: { status: "default", label: "待处理" },
+  processing: { status: "processing", label: "灌库中" },
+  completed: { status: "success", label: "已完成" },
+  failed: { status: "error", label: "失败" },
 };
 
 export default function KnowledgePage() {
@@ -139,9 +138,10 @@ export default function KnowledgePage() {
       title: "状态",
       dataIndex: "status",
       width: 110,
-      render: (status: string) => (
-        <Tag color={STATUS_COLORS[status] ?? "default"}>{status}</Tag>
-      ),
+      render: (status: string) => {
+        const badge = STATUS_BADGES[status] ?? { status: "default" as const, label: status };
+        return <Badge status={badge.status} text={badge.label} />;
+      },
     },
     {
       title: "上传时间",
@@ -169,10 +169,17 @@ export default function KnowledgePage() {
 
   return (
     <LayoutWrapper>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        知识库管理
-      </Typography.Title>
-      <Card title="上传 Markdown 文档" style={{ marginBottom: 16 }}>
+      <div className="page-header">
+        <div>
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            知识库管理
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            上传 Markdown 文档，异步执行切块与向量化灌库
+          </Typography.Text>
+        </div>
+      </div>
+      <div className="app-card" style={{ padding: "16px 20px", marginBottom: 16 }}>
         <Space wrap align="center">
           <Select
             placeholder="选择领域"
@@ -203,16 +210,18 @@ export default function KnowledgePage() {
           >
             上传并灌库
           </Button>
-          {polling && <Tag color="blue">正在轮询灌库状态（每 2 秒）</Tag>}
+          {polling && <Badge status="processing" text="正在轮询灌库状态（每 2 秒）" />}
         </Space>
-      </Card>
-      <Table
-        rowKey="id"
-        dataSource={docs}
-        columns={columns}
-        loading={loading}
-        pagination={false}
-      />
+      </div>
+      <div className="app-card" style={{ overflow: "hidden" }}>
+        <Table
+          rowKey="id"
+          dataSource={docs}
+          columns={columns}
+          loading={loading}
+          pagination={false}
+        />
+      </div>
     </LayoutWrapper>
   );
 }

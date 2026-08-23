@@ -1,9 +1,12 @@
 "use client";
 
-import { CheckCircleOutlined, ApiOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  ApiOutlined,
+  CheckCircleOutlined,
+  ReloadOutlined,
+} from "@ant-design/icons";
 import {
   Button,
-  Card,
   Col,
   Row,
   Space,
@@ -82,12 +85,19 @@ export default function SettingsPage() {
 
   return (
     <LayoutWrapper>
-      <Typography.Title level={4} style={{ marginTop: 0 }}>
-        模型设置
-      </Typography.Title>
-      <Typography.Paragraph type="secondary">
-        切换问答使用的当前模型（回答生成与意图路由同时生效）；切换立即对后续提问生效，不影响进行中的回答。
-      </Typography.Paragraph>
+      <div className="page-header">
+        <div>
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            模型设置
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            切换问答使用的当前模型（回答生成与意图路由同时生效）；切换立即对后续提问生效，不影响进行中的回答
+          </Typography.Text>
+        </div>
+        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
+          刷新
+        </Button>
+      </div>
 
       {loading && !settings ? (
         <div style={{ textAlign: "center", padding: 48 }}>
@@ -99,42 +109,73 @@ export default function SettingsPage() {
             const test = tests[provider.id] ?? { status: "idle" as const };
             return (
               <Col key={provider.id} xs={24} md={12}>
-                <Card
-                  title={
-                    <Space>
-                      <span>{provider.name}</span>
-                      {provider.active && <Tag color="green">使用中</Tag>}
-                    </Space>
-                  }
-                  extra={
-                    provider.active ? (
-                      <CheckCircleOutlined style={{ color: "#52c41a", fontSize: 18 }} />
-                    ) : null
-                  }
+                <div
+                  className="app-card"
+                  style={{
+                    padding: 20,
+                    ...(provider.active
+                      ? {
+                          borderColor: "#1677ff",
+                          boxShadow: "0 0 0 3px rgba(22, 119, 255, 0.08)",
+                        }
+                      : {}),
+                  }}
                 >
-                  <Space direction="vertical" size={4} style={{ width: "100%" }}>
-                    <Typography.Text type="secondary">{provider.platform}</Typography.Text>
-                    <div>
-                      模型标识：<Typography.Text code>{provider.model}</Typography.Text>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 14,
+                    }}
+                  >
+                    <Space>
+                      <Typography.Text strong style={{ fontSize: 15 }}>
+                        {provider.name}
+                      </Typography.Text>
+                      {provider.active && <Tag color="blue">当前使用</Tag>}
+                    </Space>
+                    {provider.active && (
+                      <CheckCircleOutlined
+                        style={{ color: "#1677ff", fontSize: 18 }}
+                      />
+                    )}
+                  </div>
+                  <Space direction="vertical" size={5} style={{ width: "100%" }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                      {provider.platform}
+                    </Typography.Text>
+                    <div style={{ fontSize: 13 }}>
+                      模型标识：
+                      <Typography.Text code>{provider.model}</Typography.Text>
                     </div>
-                    <div>
-                      接口地址：<Typography.Text code>{provider.base_url}</Typography.Text>
+                    <div style={{ fontSize: 13, wordBreak: "break-all" }}>
+                      接口地址：
+                      <Typography.Text code>{provider.base_url}</Typography.Text>
                     </div>
-                    <div>
+                    <div style={{ fontSize: 13 }}>
                       API Key：
                       {provider.api_key_configured ? (
-                        <Tag color="green">已配置</Tag>
+                        <Tag color="green" style={{ marginInlineStart: 4 }}>
+                          已配置
+                        </Tag>
                       ) : (
-                        <Tag color="red">未配置</Tag>
+                        <Tag color="red" style={{ marginInlineStart: 4 }}>
+                          未配置
+                        </Tag>
                       )}
                     </div>
                     {test.status === "ok" && (
-                      <Typography.Text type="success">{test.detail}</Typography.Text>
+                      <Typography.Text type="success" style={{ fontSize: 12.5 }}>
+                        {test.detail}
+                      </Typography.Text>
                     )}
                     {test.status === "failed" && (
-                      <Typography.Text type="danger">{test.detail}</Typography.Text>
+                      <Typography.Text type="danger" style={{ fontSize: 12.5 }}>
+                        {test.detail}
+                      </Typography.Text>
                     )}
-                    <Space style={{ marginTop: 8 }}>
+                    <Space style={{ marginTop: 10 }}>
                       <Button
                         type="primary"
                         disabled={provider.active || !provider.api_key_configured}
@@ -158,18 +199,12 @@ export default function SettingsPage() {
                       </Typography.Text>
                     )}
                   </Space>
-                </Card>
+                </div>
               </Col>
             );
           })}
         </Row>
       )}
-
-      <Space style={{ marginTop: 16 }}>
-        <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
-          刷新
-        </Button>
-      </Space>
     </LayoutWrapper>
   );
 }

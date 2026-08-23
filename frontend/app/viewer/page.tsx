@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowLeftOutlined } from "@ant-design/icons";
-import { Button, Card, Spin, Tag, Typography } from "antd";
+import { Button, Spin, Tag, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -126,7 +126,7 @@ export default function ViewerPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 48, textAlign: "center" }}>
+      <div style={{ padding: 96, textAlign: "center" }}>
         <Spin size="large" />
       </div>
     );
@@ -134,8 +134,8 @@ export default function ViewerPage() {
 
   if (error || !raw) {
     return (
-      <div style={{ padding: 24 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => router.push("/chat")}>
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "40px 24px" }}>
+        <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => router.push("/chat")}>
           返回问答
         </Button>
         <Typography.Paragraph type="danger" style={{ marginTop: 16 }}>
@@ -146,28 +146,45 @@ export default function ViewerPage() {
   }
 
   return (
-    <div style={{ maxWidth: 960, margin: "0 auto", padding: 24 }}>
-      <Button
-        icon={<ArrowLeftOutlined />}
-        onClick={() => router.push("/chat")}
-        style={{ marginBottom: 16 }}
+    <div style={{ minHeight: "100vh", background: "var(--app-bg)" }}>
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "10px 24px",
+          background: "var(--app-panel)",
+          borderBottom: "1px solid var(--app-card-border)",
+        }}
       >
-        返回问答
-      </Button>
-      <Card>
-        <Typography.Title level={3} style={{ marginTop: 0 }}>
+        <Button
+          type="text"
+          size="small"
+          icon={<ArrowLeftOutlined />}
+          onClick={() => router.push("/chat")}
+        >
+          返回问答
+        </Button>
+        <Typography.Text strong ellipsis style={{ flex: 1 }}>
           {raw.filename}
-        </Typography.Title>
-        <Tag color="blue">{raw.domain}</Tag>
-        <div className="viewer-markdown markdown-preview">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeRaw, addSourceLinePlugin as any]}
-          >
-            {raw.content}
-          </ReactMarkdown>
+        </Typography.Text>
+        <Tag>{raw.domain}</Tag>
+      </div>
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px 64px" }}>
+        <div className="app-card" style={{ padding: "40px 48px" }}>
+          <div className="viewer-markdown markdown-preview">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw, addSourceLinePlugin as any]}
+            >
+              {raw.content}
+            </ReactMarkdown>
+          </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }
