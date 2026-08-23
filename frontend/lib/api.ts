@@ -112,6 +112,16 @@ export function getMe(): Promise<UserInfo> {
   return request<UserInfo>("/api/auth/me");
 }
 
+export function changeMyPassword(
+  oldPassword: string,
+  newPassword: string
+): Promise<{ token: string }> {
+  return request<{ token: string }>("/api/auth/password", {
+    method: "PUT",
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  });
+}
+
 export function listUsers(): Promise<UserInfo[]> {
   return request<UserInfo[]>("/api/users");
 }
@@ -130,16 +140,23 @@ export function updateUserRole(id: number, role: string): Promise<{ id: number; 
   });
 }
 
-export function deleteUser(id: number): Promise<{ id: number; is_active: boolean }> {
-  return request<{ id: number; is_active: boolean }>(`/api/users/${id}`, {
-    method: "DELETE",
+export function deactivateUser(
+  id: number
+): Promise<{ id: number; is_active: boolean }> {
+  return request<{ id: number; is_active: boolean }>(`/api/users/${id}/deactivate`, {
+    method: "PUT",
   });
 }
 
 export function activateUser(id: number): Promise<{ id: number; is_active: boolean }> {
-  return request<{ id: number; is_active: boolean }>(`/api/users/${id}/active`, {
+  return request<{ id: number; is_active: boolean }>(`/api/users/${id}/activate`, {
     method: "PUT",
-    body: JSON.stringify({ is_active: true }),
+  });
+}
+
+export function deleteUser(id: number): Promise<{ id: number; deleted: boolean }> {
+  return request<{ id: number; deleted: boolean }>(`/api/users/${id}`, {
+    method: "DELETE",
   });
 }
 

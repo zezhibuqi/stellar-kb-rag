@@ -9,7 +9,11 @@ from werkzeug.security import check_password_hash
 
 from config import Config
 from errors import api_error
-from models import get_user_by_id, get_user_by_username
+from models import (
+    get_user_by_id,
+    get_user_by_username,
+    reset_user_password,
+)
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
@@ -103,3 +107,29 @@ def me():
             "role": g.user["role"],
         }
     )
+
+
+@auth_bp.put("/password")
+@require_auth
+def change_password():
+    """自助修改密码（所有登录用户）：验证当前密码；成功后 token_version
+    自增使全部旧会话失效，并返回新签发的 token 供当前会话无缝续用。"""
+    data = request.get_json(silent=True) or {}
+    old_password = data.get("old_password") or ""
+    new_password = data.get("new_password") or ""
+    if len(new_password) < 6:
+        return api_error("新密码长度不能少于 6 位", "BAD_REQUEST", 400)
+
+    user = get_user_by_username(g.user["username"])
+    if user is None or not check_password_hash(user["password_hash"], old_password):
+        return api_error("当前密码错误", "WRONG_PASSWORD", 400)
+
+    reset_user_password(user["id"], new_password)
+    refreshed = get_user_by_id(user["id"])
+    token = create_token(
+        refreshed["id"],
+        refreshed["username"],
+        refreshed["role"],
+        refreshed["token_version"],
+    )
+    return jsonify({"token": token})

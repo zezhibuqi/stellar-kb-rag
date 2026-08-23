@@ -298,6 +298,18 @@ def activate_user(user_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def delete_user(user_id: int) -> bool:
+    """永久删除用户；其上传的文档保留，上传者置空（应用层 SET NULL，
+    现有表无法追加 ON DELETE SET NULL 外键动作）。"""
+    with transaction() as cur:
+        cur.execute(
+            "UPDATE documents SET uploaded_by = NULL WHERE uploaded_by = ?",
+            (user_id,),
+        )
+        cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return cur.rowcount > 0
+
+
 def reset_user_password(user_id: int, new_password: str) -> bool:
     """重置密码并使该用户已签发的 token 全部失效。"""
     if len(new_password) < 6:

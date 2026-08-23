@@ -3,6 +3,7 @@
 import pytest
 
 from app import create_app
+from models import create_document, get_document
 
 
 @pytest.fixture()
@@ -173,9 +174,11 @@ def test_disable_user_blocks_login_and_old_token(client):
     victim_id = created.get_json()["id"]
     victim_token = _login(client, "victim", "secret123").get_json()["token"]
 
-    deleted = client.delete(f"/api/users/{victim_id}", headers=_auth_header(token))
-    assert deleted.status_code == 200
-    assert deleted.get_json()["is_active"] is False
+    deactivated = client.put(
+        f"/api/users/{victim_id}/deactivate", headers=_auth_header(token)
+    )
+    assert deactivated.status_code == 200
+    assert deactivated.get_json()["is_active"] is False
 
     blocked = _login(client, "victim", "secret123")
     assert blocked.status_code == 403
@@ -191,18 +194,38 @@ def test_enable_user_restores_login(client):
         json={"username": "victim", "password": "secret123", "role": "employee"},
     )
     victim_id = created.get_json()["id"]
-    client.delete(f"/api/users/{victim_id}", headers=_auth_header(token))
+    client.put(f"/api/users/{victim_id}/deactivate", headers=_auth_header(token))
 
     enabled = client.put(
-        f"/api/users/{victim_id}/active",
-        headers=_auth_header(token),
-        json={"is_active": True},
+        f"/api/users/{victim_id}/activate", headers=_auth_header(token)
     )
     assert enabled.status_code == 200
+    assert enabled.get_json()["is_active"] is True
     assert _login(client, "victim", "secret123").status_code == 200
 
 
-def test_delete_protections(client):
+def test_deactivate_protections(client):
+    token = _admin_token(client)
+    headers = _auth_header(token)
+    me = client.get("/api/auth/me", headers=headers).get_json()
+
+    self_deactivate = client.put(f"/api/users/{me['id']}/deactivate", headers=headers)
+    assert self_deactivate.status_code == 403
+    assert self_deactivate.get_json()["code"] == "ADMIN_SELF_DEACTIVATE"
+
+    boss2 = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": "boss2", "password": "secret123", "role": "admin"},
+    ).get_json()
+    deactivated_boss2 = client.put(
+        f"/api/users/{boss2['id']}/deactivate", headers=headers
+    )
+    assert deactivated_boss2.status_code == 200
+    assert _login(client, "boss2", "secret123").status_code == 403
+
+
+def test_delete_requires_deactivated_account(client):
     token = _admin_token(client)
     headers = _auth_header(token)
     me = client.get("/api/auth/me", headers=headers).get_json()
@@ -211,14 +234,85 @@ def test_delete_protections(client):
     assert self_delete.status_code == 403
     assert self_delete.get_json()["code"] == "ADMIN_SELF_DELETE"
 
-    boss2 = client.post(
+    active = client.post(
         "/api/users",
         headers=headers,
-        json={"username": "boss2", "password": "secret123", "role": "admin"},
+        json={"username": "activeuser", "password": "secret123", "role": "employee"},
     ).get_json()
-    deleted_boss2 = client.delete(f"/api/users/{boss2['id']}", headers=headers)
-    assert deleted_boss2.status_code == 200
-    assert _login(client, "boss2", "secret123").status_code == 403
+    refused = client.delete(f"/api/users/{active['id']}", headers=headers)
+    assert refused.status_code == 400
+    assert refused.get_json()["code"] == "NOT_DEACTIVATED"
+
+
+def test_delete_user_permanently(client):
+    token = _admin_token(client)
+    headers = _auth_header(token)
+    created = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": "gone", "password": "secret123", "role": "employee"},
+    ).get_json()
+    old_token = _login(client, "gone", "secret123").get_json()["token"]
+    client.put(f"/api/users/{created['id']}/deactivate", headers=headers)
+
+    deleted = client.delete(f"/api/users/{created['id']}", headers=headers)
+    assert deleted.status_code == 200
+    assert deleted.get_json()["deleted"] is True
+
+    # 登录与旧 token 均失效
+    assert _login(client, "gone", "secret123").status_code == 401
+    assert client.get("/api/auth/me", headers=_auth_header(old_token)).status_code == 401
+    # 记录已从列表移除
+    users = client.get("/api/users", headers=headers).get_json()
+    assert all(u["id"] != created["id"] for u in users)
+    # 再次删除返回 404
+    assert client.delete(f"/api/users/{created['id']}", headers=headers).status_code == 404
+
+
+def test_username_reusable_after_real_delete(client):
+    token = _admin_token(client)
+    headers = _auth_header(token)
+    created = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": "reborn", "password": "secret123", "role": "employee"},
+    ).get_json()
+    client.put(f"/api/users/{created['id']}/deactivate", headers=headers)
+
+    # 停用期间用户名仍被占用
+    occupied = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": "reborn", "password": "secret123"},
+    )
+    assert occupied.status_code == 400
+
+    client.delete(f"/api/users/{created['id']}", headers=headers)
+    recreated = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": "reborn", "password": "secret123"},
+    )
+    assert recreated.status_code == 201
+
+
+def test_delete_user_keeps_documents_with_null_uploader(client):
+    token = _admin_token(client)
+    headers = _auth_header(token)
+    created = client.post(
+        "/api/users",
+        headers=headers,
+        json={"username": "uploader", "password": "secret123", "role": "admin"},
+    ).get_json()
+    doc_id = create_document("Uploader's doc.md", "common", uploaded_by=created["id"])
+
+    client.put(f"/api/users/{created['id']}/deactivate", headers=headers)
+    deleted = client.delete(f"/api/users/{created['id']}", headers=headers)
+    assert deleted.status_code == 200
+
+    doc = get_document(doc_id)
+    assert doc is not None
+    assert doc["uploaded_by"] is None
 
 
 def test_reset_password_invalidates_old_token(client):
@@ -266,7 +360,7 @@ def test_duplicate_username_after_disable(client):
         json={"username": "ghost", "password": "secret123", "role": "employee"},
     )
     ghost_id = created.get_json()["id"]
-    client.delete(f"/api/users/{ghost_id}", headers=_auth_header(token))
+    client.put(f"/api/users/{ghost_id}/deactivate", headers=_auth_header(token))
 
     duplicate = client.post(
         "/api/users",
@@ -276,6 +370,79 @@ def test_duplicate_username_after_disable(client):
     assert duplicate.status_code == 400
 
 
+def test_change_own_password(client):
+    token = _admin_token(client)
+    headers = _auth_header(token)
+    resp = client.put(
+        "/api/auth/password",
+        headers=headers,
+        json={"old_password": "123456", "new_password": "brandnew123"},
+    )
+    assert resp.status_code == 200
+    new_token = resp.get_json()["token"]
+
+    # 旧 token 失效，新 token 可用（当前会话无缝续用）
+    assert client.get("/api/auth/me", headers=headers).status_code == 401
+    assert client.get("/api/auth/me", headers=_auth_header(new_token)).status_code == 200
+
+    # 旧密码失效、新密码可登录
+    assert _login(client, "admin", "123456").status_code == 401
+    assert _login(client, "admin", "brandnew123").status_code == 200
+
+
+def test_non_admin_can_change_own_password(client):
+    """历史问题回归：非管理员可自助修改密码。"""
+    token = _admin_token(client)
+    created = client.post(
+        "/api/users",
+        headers=_auth_header(token),
+        json={"username": "selfchange", "password": "secret123", "role": "employee"},
+    ).get_json()
+    user_token = _login(client, "selfchange", "secret123").get_json()["token"]
+
+    resp = client.put(
+        "/api/auth/password",
+        headers=_auth_header(user_token),
+        json={"old_password": "secret123", "new_password": "changed456"},
+    )
+    assert resp.status_code == 200
+    assert client.get(
+        "/api/auth/me", headers=_auth_header(resp.get_json()["token"])
+    ).status_code == 200
+    assert _login(client, "selfchange", "changed456").status_code == 200
+
+
+def test_change_password_wrong_old_password(client):
+    token = _admin_token(client)
+    resp = client.put(
+        "/api/auth/password",
+        headers=_auth_header(token),
+        json={"old_password": "wrongpass", "new_password": "brandnew123"},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["code"] == "WRONG_PASSWORD"
+    # 原密码不受影响
+    assert _login(client, "admin", "123456").status_code == 200
+
+
+def test_change_password_too_short(client):
+    token = _admin_token(client)
+    resp = client.put(
+        "/api/auth/password",
+        headers=_auth_header(token),
+        json={"old_password": "123456", "new_password": "123"},
+    )
+    assert resp.status_code == 400
+
+
+def test_change_password_requires_auth(client):
+    resp = client.put(
+        "/api/auth/password",
+        json={"old_password": "whatever", "new_password": "brandnew123"},
+    )
+    assert resp.status_code == 401
+
+
 def test_list_includes_is_active(client):
     token = _admin_token(client)
     users = client.get("/api/users", headers=_auth_header(token)).get_json()
@@ -283,7 +450,7 @@ def test_list_includes_is_active(client):
     assert all(isinstance(user["is_active"], bool) for user in users)
 
 
-def test_list_shows_disabled_after_delete(client):
+def test_list_shows_deactivated_account(client):
     token = _admin_token(client)
     created = client.post(
         "/api/users",
@@ -291,7 +458,7 @@ def test_list_shows_disabled_after_delete(client):
         json={"username": "victim", "password": "secret123", "role": "employee"},
     )
     victim_id = created.get_json()["id"]
-    client.delete(f"/api/users/{victim_id}", headers=_auth_header(token))
+    client.put(f"/api/users/{victim_id}/deactivate", headers=_auth_header(token))
 
     users = client.get("/api/users", headers=_auth_header(token)).get_json()
     victim = next(user for user in users if user["id"] == victim_id)

@@ -4,6 +4,7 @@ import {
   ControlOutlined,
   DatabaseOutlined,
   FileTextOutlined,
+  KeyOutlined,
   LogoutOutlined,
   MessageOutlined,
   MoonOutlined,
@@ -12,10 +13,28 @@ import {
   TeamOutlined,
   UserOutlined,
 } from "@ant-design/icons";
-import { Avatar, Button, Dropdown, Layout, Menu, Typography } from "antd";
+import {
+  Avatar,
+  Button,
+  Dropdown,
+  Form,
+  Input,
+  Layout,
+  Menu,
+  Modal,
+  Typography,
+  message,
+} from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { clearAuth, getStoredUser, type UserInfo } from "@/lib/api";
+import {
+  ApiRequestError,
+  changeMyPassword,
+  clearAuth,
+  getStoredUser,
+  setToken,
+  type UserInfo,
+} from "@/lib/api";
 import { useThemeMode } from "@/components/ThemeProvider";
 
 const BRAND_MARK = (
@@ -42,6 +61,9 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [ready, setReady] = useState(false);
   const { mode, toggle } = useThemeMode();
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [pwdLoading, setPwdLoading] = useState(false);
+  const [pwdForm] = Form.useForm();
 
   useEffect(() => {
     const stored = getStoredUser();
@@ -72,6 +94,32 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
   const logout = () => {
     clearAuth();
     router.replace("/login");
+  };
+
+  const handleChangePassword = async () => {
+    let values: { old_password: string; new_password: string };
+    try {
+      values = await pwdForm.validateFields();
+    } catch {
+      return;
+    }
+    setPwdLoading(true);
+    try {
+      const result = await changeMyPassword(
+        values.old_password,
+        values.new_password
+      );
+      setToken(result.token);
+      message.success("密码已修改");
+      setPwdOpen(false);
+      pwdForm.resetFields();
+    } catch (error) {
+      message.error(
+        error instanceof ApiRequestError ? error.message : "修改密码失败，请稍后重试"
+      );
+    } finally {
+      setPwdLoading(false);
+    }
   };
 
   const menuItems = [
@@ -122,6 +170,13 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
           <Dropdown
             menu={{
               items: [
+                {
+                  key: "password",
+                  icon: <KeyOutlined />,
+                  label: "修改密码",
+                  onClick: () => setPwdOpen(true),
+                },
+                { type: "divider" },
                 { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: logout },
               ],
             }}
@@ -183,6 +238,53 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
           {children}
         </Layout.Content>
       </Layout>
+      <Modal
+        title="修改密码"
+        open={pwdOpen}
+        onOk={handleChangePassword}
+        confirmLoading={pwdLoading}
+        onCancel={() => {
+          setPwdOpen(false);
+          pwdForm.resetFields();
+        }}
+        okText="修改"
+        cancelText="取消"
+      >
+        <Form form={pwdForm} layout="vertical">
+          <Form.Item
+            name="old_password"
+            label="当前密码"
+            rules={[{ required: true, message: "请输入当前密码" }]}
+          >
+            <Input.Password autoComplete="current-password" />
+          </Form.Item>
+          <Form.Item
+            name="new_password"
+            label="新密码"
+            rules={[{ required: true, min: 6, message: "新密码至少 6 位" }]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item
+            name="confirm_password"
+            label="确认新密码"
+            dependencies={["new_password"]}
+            rules={[
+              { required: true, message: "请再次输入新密码" },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue("new_password") === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error("两次输入的密码不一致"));
+                },
+              }),
+            ]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Layout>
   );
 }
