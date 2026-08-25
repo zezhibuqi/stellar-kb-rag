@@ -15,7 +15,7 @@
 - **混合检索增强**：向量检索 + 重排序（Reranker），提升答案准确性
 - **结构化表格处理**：Markdown 表格完整保留，避免切片破坏语义
 - **智能问答生成**：基于 LLM 生成回答，支持流式（SSE）输出；生成失败显式提示而非静默断流
-- **管理员可切换模型**：预设提供方注册表（DeepSeek / 超算互联网 GLM-5-Base），界面切换当前模型并即时生效，支持连通性测试；思考型模型（GLM-5-Base）的推理预算与 `response_format` 兼容性在注册表中按提供方声明
+- **管理员可切换模型**：预设提供方注册表（OpenAI 兼容协议，内置 DeepSeek、硅基流动、超算互联网、小米平台的 5 个模型），界面切换当前模型并即时生效，支持连通性测试；思考型模型的推理预算与 `response_format` 兼容性在注册表中按提供方声明
 - **异步文档入库**：Web 端上传后后台处理，避免超时；支持状态轮询
 - **离线灌库脚本**：批量处理 Markdown 文件，便于初始化数据
 - **管理员面板**：文档上传/删除/列表，用户创建/角色管理/停用启用/永久删除/重置密码
@@ -38,7 +38,7 @@
 |           | 结构化数据     | SQLite（WAL 模式 + 每线程独立连接）                                               |
 | **AI 模型** | Embedding | `BAAI/bge-m3`（SiliconFlow API，1024 维）                                  |
 |           | Reranker  | `BAAI/bge-reranker-v2-m3`（自定义封装）                                       |
-|           | LLM       | `deepseek-v4-flash`（DeepSeek）或 `GLM-5-Base`（超算互联网 scnet），管理员界面可切换，流式支持 |
+|           | LLM       | OpenAI 兼容接口，内置 5 个模型：DeepSeek-V4-Flash（DeepSeek）、GLM-5-Base（超算互联网 scnet）、DeepSeek-V4-Flash（硅基流动）、MIMO-V2.5 / MIMO-V2.5-Pro（小米）；管理员界面切换，流式支持，新增 OpenAI 兼容模型只需在注册表登记 |
 
 ---
 
@@ -122,8 +122,9 @@ Copy-Item .env.example .env   # Windows
 - `SILICONFLOW_API_KEY`：硅基流动 API 密钥
 - `DEEPSEEK_API_KEY`：DeepSeek API 密钥
 - `SCNET_API_KEY`：超算互联网（scnet）API 密钥（使用 GLM-5-Base 时必填；不填则该模型在界面中不可切换）
+- `XIAOMI_API_KEY`：小米 API 密钥（使用 MIMO-V2.5 / MIMO-V2.5-Pro 时必填；不填则该模型在界面中不可切换）
 - `JWT_SECRET_KEY`：随机字符串（≥32 字符）
-- `LLM_PROVIDER`：当前模型提供方默认值（`deepseek` / `scnet`），管理员界面切换后以 DB 设置为准
+- `LLM_PROVIDER`：当前模型提供方的默认 id（须为注册表中已存在的 id，如 `deepseek`、`scnet-glm5base`），管理员界面切换后以 DB 设置为准
 
 初始化数据库并启动后端：
 
@@ -199,7 +200,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 
 ## 新增 LLM 模型提供方
 
-LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理（DeepSeek 与 scnet GLM-5-Base 已内置）。模型设置页面与接口均从注册表动态渲染，**新增模型只需三步、无需改动前端**：
+LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走 OpenAI 兼容接口。已内置 5 个模型：DeepSeek 的 DeepSeek-V4-Flash、硅基流动的 DeepSeek-V4-Flash、超算互联网的 GLM-5-Base、小米的 MIMO-V2.5 与 MIMO-V2.5-Pro。任何 OpenAI 兼容协议的模型均可接入——模型设置页面与接口均从注册表动态渲染，**新增模型只需三步、无需改动前端**：
 
 1. **注册提供方**：在 `llm.py` 的 `_build_providers()` 列表中新增一项 `ModelProvider(...)`（文件内有完整注释示例，可参考抄改）；**模型标识直接写在 `model` 字段**，同平台多模型只需 `id` 唯一、`base_url` 与密钥可复用；
 2. **添加配置项**：在 `config.py` 中为该平台的密钥与接口地址新增环境变量映射（同样有注释示例）；
