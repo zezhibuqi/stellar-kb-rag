@@ -12,19 +12,19 @@ from models import get_setting, set_setting
 @pytest.fixture()
 def scnet_key(monkeypatch):
     """临时为 scnet 提供方配置密钥，用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet"].api_key
-    llm.PROVIDERS["scnet"].api_key = "sk-test-scnet"
+    original = llm.PROVIDERS["scnet-glm5base"].api_key
+    llm.PROVIDERS["scnet-glm5base"].api_key = "sk-test-scnet"
     yield
-    llm.PROVIDERS["scnet"].api_key = original
+    llm.PROVIDERS["scnet-glm5base"].api_key = original
 
 
 @pytest.fixture()
 def no_scnet_key():
     """临时清除 scnet 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet"].api_key
-    llm.PROVIDERS["scnet"].api_key = ""
+    original = llm.PROVIDERS["scnet-glm5base"].api_key
+    llm.PROVIDERS["scnet-glm5base"].api_key = ""
     yield
-    llm.PROVIDERS["scnet"].api_key = original
+    llm.PROVIDERS["scnet-glm5base"].api_key = original
 
 
 def _fake_client(calls: list, stream: bool = False, reply: str = "ok"):
@@ -48,11 +48,17 @@ def _fake_client(calls: list, stream: bool = False, reply: str = "ok"):
 
 def test_registry_contains_preset_providers():
     providers = {p.id: p for p in llm.list_providers()}
-    assert set(providers) == {"deepseek", "scnet"}
+    assert set(providers) == {
+        "deepseek",
+        "scnet-glm5base",
+        "siliconflow-dsv4f",
+        "xiaomi-mimov2.5",
+        "xiaomi-mimov2.5pro",
+    }
     assert providers["deepseek"].model == "deepseek-v4-flash"
     assert providers["deepseek"].base_url == Config.DEEPSEEK_BASE_URL
-    assert providers["scnet"].model == "GLM-5-Base"
-    assert providers["scnet"].base_url == "https://api.scnet.cn/api/llm/v1"
+    assert providers["scnet-glm5base"].model == "GLM-5-Base"
+    assert providers["scnet-glm5base"].base_url == "https://api.scnet.cn/api/llm/v1"
 
 
 def test_active_provider_defaults_to_env(monkeypatch):
@@ -62,8 +68,8 @@ def test_active_provider_defaults_to_env(monkeypatch):
 
 def test_active_provider_follows_db_setting(scnet_key):
     assert get_setting(llm.SETTING_KEY) is None
-    set_setting(llm.SETTING_KEY, "scnet")
-    assert llm.get_active_provider().id == "scnet"
+    set_setting(llm.SETTING_KEY, "scnet-glm5base")
+    assert llm.get_active_provider().id == "scnet-glm5base"
 
 
 def test_active_provider_falls_back_on_invalid_setting(monkeypatch):
@@ -73,7 +79,7 @@ def test_active_provider_falls_back_on_invalid_setting(monkeypatch):
 
 
 def test_get_client_rejects_missing_key(no_scnet_key):
-    set_setting(llm.SETTING_KEY, "scnet")
+    set_setting(llm.SETTING_KEY, "scnet-glm5base")
     with pytest.raises(RuntimeError, match="API Key 未配置"):
         llm.get_client()
 
@@ -85,7 +91,7 @@ def test_invoke_uses_active_provider_model(monkeypatch, scnet_key):
     assert llm.invoke("hi") == "ok"
     assert calls[0]["model"] == "deepseek-v4-flash"
 
-    set_setting(llm.SETTING_KEY, "scnet")
+    set_setting(llm.SETTING_KEY, "scnet-glm5base")
     assert llm.invoke("hi") == "ok"
     assert calls[1]["model"] == "GLM-5-Base"
 
@@ -94,7 +100,7 @@ def test_invoke_json_uses_active_provider_model(monkeypatch, scnet_key):
     calls: list = []
     fake = _fake_client(calls, reply='{"intent": "knowledge"}')
     monkeypatch.setattr(llm, "get_client", lambda provider=None: fake)
-    set_setting(llm.SETTING_KEY, "scnet")
+    set_setting(llm.SETTING_KEY, "scnet-glm5base")
     result = llm.invoke_json('输出 {"intent": "knowledge"}')
     assert result == {"intent": "knowledge"}
     assert calls[0]["model"] == "GLM-5-Base"
@@ -143,7 +149,7 @@ def test_stream_truncated_without_content_raises(monkeypatch):
 def test_stream_uses_active_provider_model(monkeypatch, scnet_key):
     calls: list = []
     monkeypatch.setattr(llm, "get_client", lambda provider=None: _fake_client(calls, stream=True))
-    set_setting(llm.SETTING_KEY, "scnet")
+    set_setting(llm.SETTING_KEY, "scnet-glm5base")
     tokens = list(llm.stream("hi"))
     assert tokens == ["token"]
     assert calls[0]["model"] == "GLM-5-Base"

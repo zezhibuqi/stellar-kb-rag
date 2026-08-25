@@ -35,6 +35,8 @@ class Config:
     DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     SCNET_API_KEY = os.getenv("SCNET_API_KEY", "")
     SCNET_BASE_URL = os.getenv("SCNET_BASE_URL", "https://api.scnet.cn/api/llm/v1")
+    XIAOMI_API_KEY = os.getenv("XIAOMI_API_KEY", "")
+    XIAOMI_BASE_URL = os.getenv("XIAOMI_BASE_URL", "https://api.xiaomimimo.com/v1")
 
     # 当前模型提供方的默认值（管理员可在界面切换，DB 设置优先）
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")

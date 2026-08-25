@@ -16,19 +16,19 @@ def client():
 @pytest.fixture()
 def scnet_key():
     """临时为 scnet 提供方配置密钥，用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet"].api_key
-    llm.PROVIDERS["scnet"].api_key = "sk-test-scnet"
+    original = llm.PROVIDERS["scnet-glm5base"].api_key
+    llm.PROVIDERS["scnet-glm5base"].api_key = "sk-test-scnet"
     yield
-    llm.PROVIDERS["scnet"].api_key = original
+    llm.PROVIDERS["scnet-glm5base"].api_key = original
 
 
 @pytest.fixture()
 def no_scnet_key():
     """临时清除 scnet 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet"].api_key
-    llm.PROVIDERS["scnet"].api_key = ""
+    original = llm.PROVIDERS["scnet-glm5base"].api_key
+    llm.PROVIDERS["scnet-glm5base"].api_key = ""
     yield
-    llm.PROVIDERS["scnet"].api_key = original
+    llm.PROVIDERS["scnet-glm5base"].api_key = original
 
 
 def _login(client, username: str, password: str = "123456"):
@@ -61,7 +61,13 @@ def test_get_model_settings_shape(client):
     data = resp.get_json()
     assert data["active"] == "deepseek"
     assert data["default"] == "deepseek"
-    assert {p["id"] for p in data["providers"]} == {"deepseek", "scnet"}
+    assert {p["id"] for p in data["providers"]} == {
+        "deepseek",
+        "scnet-glm5base",
+        "siliconflow-dsv4f",
+        "xiaomi-mimov2.5",
+        "xiaomi-mimov2.5pro",
+    }
     for provider in data["providers"]:
         assert set(provider) == {
             "id",
@@ -89,7 +95,7 @@ def test_switch_rejects_unconfigured_key(client, no_scnet_key):
     resp = client.put(
         "/api/settings/model",
         headers=_headers(token),
-        json={"provider_id": "scnet"},
+        json={"provider_id": "scnet-glm5base"},
     )
     assert resp.status_code == 400
     assert resp.get_json()["code"] == "PROVIDER_KEY_MISSING"
@@ -103,23 +109,29 @@ def test_switch_persists_and_takes_effect(client, scnet_key):
     resp = client.put(
         "/api/settings/model",
         headers=_headers(token),
-        json={"provider_id": "scnet"},
+        json={"provider_id": "scnet-glm5base"},
     )
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["active"] == "scnet"
+    assert data["active"] == "scnet-glm5base"
     active_flags = {p["id"]: p["active"] for p in data["providers"]}
-    assert active_flags == {"deepseek": False, "scnet": True}
+    assert active_flags == {
+        "deepseek": False,
+        "scnet-glm5base": True,
+        "siliconflow-dsv4f": False,
+        "xiaomi-mimov2.5": False,
+        "xiaomi-mimov2.5pro": False,
+    }
 
     # 再次查询仍为 scnet（DB 持久化）
     resp = client.get("/api/settings/model", headers=_headers(token))
-    assert resp.get_json()["active"] == "scnet"
-    assert llm.get_active_provider().id == "scnet"
+    assert resp.get_json()["active"] == "scnet-glm5base"
+    assert llm.get_active_provider().id == "scnet-glm5base"
 
 
 def test_switch_back_to_deepseek(client, scnet_key):
     token = _login(client, "admin")
-    client.put("/api/settings/model", headers=_headers(token), json={"provider_id": "scnet"})
+    client.put("/api/settings/model", headers=_headers(token), json={"provider_id": "scnet-glm5base"})
     resp = client.put(
         "/api/settings/model", headers=_headers(token), json={"provider_id": "deepseek"}
     )
@@ -133,7 +145,7 @@ def test_provider_test_success(client, scnet_key, monkeypatch):
     resp = client.post(
         "/api/settings/model/test",
         headers=_headers(token),
-        json={"provider_id": "scnet"},
+        json={"provider_id": "scnet-glm5base"},
     )
     assert resp.status_code == 200
     data = resp.get_json()

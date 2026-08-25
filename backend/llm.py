@@ -41,6 +41,7 @@ class ModelProvider:
 def _build_providers() -> dict[str, ModelProvider]:
     providers = [
         ModelProvider(
+            #此id为默认，不可更改
             id="deepseek",
             name="DeepSeek-V4-Flash-0731",
             platform="DeepSeek 开放平台",
@@ -49,7 +50,7 @@ def _build_providers() -> dict[str, ModelProvider]:
             api_key=Config.DEEPSEEK_API_KEY,
         ),
         ModelProvider(
-            id="scnet",
+            id="scnet-glm5base",
             name="GLM-5-Base",
             platform="国家超算互联网（scnet）",
             base_url=Config.SCNET_BASE_URL,
@@ -57,6 +58,30 @@ def _build_providers() -> dict[str, ModelProvider]:
             api_key=Config.SCNET_API_KEY,
             router_max_tokens=2000,
             supports_response_format=False,
+        ),
+        ModelProvider(
+            id="siliconflow-dsv4f",
+            name="DeepSeek-V4-Flash-0731",
+            platform="硅基流动（SiliconFlow）",
+            base_url=Config.SILICONFLOW_BASE_URL,
+            model="deepseek-ai/DeepSeek-V4-Flash",
+            api_key=Config.SILICONFLOW_API_KEY,
+        ),
+        ModelProvider(
+            id="xiaomi-mimov2.5",
+            name="MIMO-V2.5",
+            platform="小米",
+            base_url=Config.XIAOMI_BASE_URL,
+            model="mimo-v2.5",
+            api_key=Config.XIAOMI_API_KEY,
+        ),
+        ModelProvider(
+            id="xiaomi-mimov2.5pro",
+            name="MIMO-V2.5-Pro",
+            platform="小米",
+            base_url=Config.XIAOMI_BASE_URL,
+            model="mimo-v2.5-pro",
+            api_key=Config.XIAOMI_API_KEY,
         ),
         # ── 新增模型提供方示例（两处配套：本注册表 + config.py/.env 的密钥与地址）──
         # 以硅基流动（SiliconFlow）平台的 deepseek-ai/DeepSeek-V4-Flash 为例，
