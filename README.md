@@ -64,6 +64,7 @@ stellar-kb-rag/
 │   ├── ingest.py           # 离线灌库 CLI
 │   ├── eval.py             # Golden Set 评测脚本
 │   ├── eval_orders.py      # 订单结构化问答评测脚本
+│   ├── eval_models.py      # 多模型对比评测脚本
 │   ├── order_qa.py         # 订单意图路由 + 参数化 SQL 执行器
 │   ├── orders_seed.py      # 订单种子数据（确定性、幂等）
 │   ├── orders_api.py       # 订单数据列表接口（过滤/分页/脱敏）
@@ -71,7 +72,7 @@ stellar-kb-rag/
 │   ├── e2e_demo.py         # 本地端到端联调脚本
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（145 个用例）
+│   └── tests/              # 自动化测试（149 个用例）
 ├── frontend/
 │   ├── app/                # login / chat / knowledge / users / viewer / orders / settings 页面
 │   ├── components/         # LayoutWrapper / ChatBox / SourceCard
@@ -218,7 +219,7 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（145 个用例）
+# 单元/接口/评测逻辑测试（149 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）
@@ -229,6 +230,9 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 
 # 订单结构化问答评测（Golden Set 21 条）
 .\.venv\Scripts\python.exe backend\eval_orders.py --golden docs\golden_orders.json --report docs\eval_orders_report.md
+
+# 多模型对比评测（订单正确率/路由准确率/检索对照/流式延迟；需知识库已灌库）
+.\.venv\Scripts\python.exe backend\eval_models.py --report docs\model_comparison_report.md
 ```
 
 当前评测结果：总体 Hit Rate 88%、MRR 0.83（达标）；product 领域 66.67%，改进计划见 `docs/eval_report.md`。
