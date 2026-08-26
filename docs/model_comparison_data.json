@@ -1,0 +1,57 @@
+[
+  {
+    "provider_id": "deepseek",
+    "answer_accuracy": 0.9523809523809523,
+    "route_accuracy": 0.9523809523809523,
+    "latency": {
+      "ttft": 0.741,
+      "total": 0.823,
+      "runs_ok": 3,
+      "runs_failed": 0
+    }
+  },
+  {
+    "provider_id": "scnet-glm5base",
+    "answer_accuracy": 0.9523809523809523,
+    "route_accuracy": 1.0,
+    "latency": {
+      "ttft": 14.838,
+      "total": 15.551,
+      "runs_ok": 3,
+      "runs_failed": 0
+    }
+  },
+  {
+    "provider_id": "siliconflow-dsv4f",
+    "answer_accuracy": 1.0,
+    "route_accuracy": 1.0,
+    "latency": {
+      "ttft": 2.006,
+      "total": 2.096,
+      "runs_ok": 3,
+      "runs_failed": 0
+    }
+  },
+  {
+    "provider_id": "xiaomi-mimov2.5",
+    "answer_accuracy": 0.9047619047619048,
+    "route_accuracy": 1.0,
+    "latency": {
+      "ttft": 3.837,
+      "total": 5.373,
+      "runs_ok": 3,
+      "runs_failed": 0
+    }
+  },
+  {
+    "provider_id": "xiaomi-mimov2.5pro",
+    "answer_accuracy": 0.9523809523809523,
+    "route_accuracy": 1.0,
+    "latency": {
+      "ttft": 13.184,
+      "total": 13.831,
+      "runs_ok": 3,
+      "runs_failed": 0
+    }
+  }
+]
