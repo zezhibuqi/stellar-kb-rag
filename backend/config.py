@@ -38,8 +38,8 @@ class Config:
     XIAOMI_API_KEY = os.getenv("XIAOMI_API_KEY", "")
     XIAOMI_BASE_URL = os.getenv("XIAOMI_BASE_URL", "https://api.xiaomimimo.com/v1")
 
-    # 当前模型提供方的默认值（管理员可在界面切换，DB 设置优先）
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")
+    # 当前模型的默认值（管理员可在界面切换，DB 设置优先）
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek-v4f")
 
     # ── 新增 LLM 提供方示例：与此配套还需在 llm.py 的 _build_providers()
     #    注册 ModelProvider（模型标识直接写在注册表），并在 .env 填写密钥

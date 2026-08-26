@@ -1,7 +1,7 @@
 """LLM 客户端（OpenAI 兼容接口）：预设提供方注册表 + 管理员可切换的当前模型。
 
 当前模型的解析顺序：app_settings 表的 llm_provider 值 → .env 的 LLM_PROVIDER
-→ 注册表中的 deepseek 兜底。回答生成与意图路由共用同一当前模型。
+→ 注册表中的 deepseek-v4f 兜底。回答生成与意图路由共用同一当前模型。
 """
 
 import json
@@ -41,8 +41,7 @@ class ModelProvider:
 def _build_providers() -> dict[str, ModelProvider]:
     providers = [
         ModelProvider(
-            #此id为默认，不可更改
-            id="deepseek",
+            id="deepseek-v4f",
             name="DeepSeek-V4-Flash-0731",
             platform="DeepSeek 开放平台",
             base_url=Config.DEEPSEEK_BASE_URL,
@@ -74,6 +73,7 @@ def _build_providers() -> dict[str, ModelProvider]:
             base_url=Config.XIAOMI_BASE_URL,
             model="mimo-v2.5",
             api_key=Config.XIAOMI_API_KEY,
+            router_max_tokens=2000,
         ),
         ModelProvider(
             id="xiaomi-mimov2.5pro",
@@ -82,6 +82,7 @@ def _build_providers() -> dict[str, ModelProvider]:
             base_url=Config.XIAOMI_BASE_URL,
             model="mimo-v2.5-pro",
             api_key=Config.XIAOMI_API_KEY,
+            router_max_tokens=2000,
         ),
         # ── 新增模型提供方示例（两处配套：本注册表 + config.py/.env 的密钥与地址）──
         # 以硅基流动（SiliconFlow）平台的 deepseek-ai/DeepSeek-V4-Flash 为例，
@@ -109,7 +110,7 @@ def _build_providers() -> dict[str, ModelProvider]:
 
 PROVIDERS = _build_providers()
 DEFAULT_PROVIDER_ID = (
-    Config.LLM_PROVIDER if Config.LLM_PROVIDER in PROVIDERS else "deepseek"
+    Config.LLM_PROVIDER if Config.LLM_PROVIDER in PROVIDERS else "deepseek-v4f"
 )
 
 _clients: dict[str, OpenAI] = {}

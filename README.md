@@ -125,7 +125,7 @@ Copy-Item .env.example .env   # Windows
 - `SCNET_API_KEY`：超算互联网（scnet）API 密钥（使用 GLM-5-Base 时必填；不填则该模型在界面中不可切换）
 - `XIAOMI_API_KEY`：小米 API 密钥（使用 MIMO-V2.5 / MIMO-V2.5-Pro 时必填；不填则该模型在界面中不可切换）
 - `JWT_SECRET_KEY`：随机字符串（≥32 字符）
-- `LLM_PROVIDER`：当前模型提供方的默认 id（须为注册表中已存在的 id，如 `deepseek`、`scnet-glm5base`），管理员界面切换后以 DB 设置为准
+- `LLM_PROVIDER`：当前模型的默认 id（须为注册表中已存在的 id，如 `deepseek-v4f`、`scnet-glm5base`），管理员界面切换后以 DB 设置为准
 
 初始化数据库并启动后端：
 

@@ -59,10 +59,10 @@ def test_get_model_settings_shape(client):
     resp = client.get("/api/settings/model", headers=_headers(token))
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["active"] == "deepseek"
-    assert data["default"] == "deepseek"
+    assert data["active"] == "deepseek-v4f"
+    assert data["default"] == "deepseek-v4f"
     assert {p["id"] for p in data["providers"]} == {
-        "deepseek",
+        "deepseek-v4f",
         "scnet-glm5base",
         "siliconflow-dsv4f",
         "xiaomi-mimov2.5",
@@ -101,7 +101,7 @@ def test_switch_rejects_unconfigured_key(client, no_scnet_key):
     assert resp.get_json()["code"] == "PROVIDER_KEY_MISSING"
     # 未写入设置
     resp = client.get("/api/settings/model", headers=_headers(token))
-    assert resp.get_json()["active"] == "deepseek"
+    assert resp.get_json()["active"] == "deepseek-v4f"
 
 
 def test_switch_persists_and_takes_effect(client, scnet_key):
@@ -116,7 +116,7 @@ def test_switch_persists_and_takes_effect(client, scnet_key):
     assert data["active"] == "scnet-glm5base"
     active_flags = {p["id"]: p["active"] for p in data["providers"]}
     assert active_flags == {
-        "deepseek": False,
+        "deepseek-v4f": False,
         "scnet-glm5base": True,
         "siliconflow-dsv4f": False,
         "xiaomi-mimov2.5": False,
@@ -133,10 +133,10 @@ def test_switch_back_to_deepseek(client, scnet_key):
     token = _login(client, "admin")
     client.put("/api/settings/model", headers=_headers(token), json={"provider_id": "scnet-glm5base"})
     resp = client.put(
-        "/api/settings/model", headers=_headers(token), json={"provider_id": "deepseek"}
+        "/api/settings/model", headers=_headers(token), json={"provider_id": "deepseek-v4f"}
     )
     assert resp.status_code == 200
-    assert resp.get_json()["active"] == "deepseek"
+    assert resp.get_json()["active"] == "deepseek-v4f"
 
 
 def test_provider_test_success(client, scnet_key, monkeypatch):
@@ -162,7 +162,7 @@ def test_provider_test_failure_returns_502(client, monkeypatch):
     resp = client.post(
         "/api/settings/model/test",
         headers=_headers(token),
-        json={"provider_id": "deepseek"},
+        json={"provider_id": "deepseek-v4f"},
     )
     assert resp.status_code == 502
     assert resp.get_json()["code"] == "PROVIDER_TEST_FAILED"

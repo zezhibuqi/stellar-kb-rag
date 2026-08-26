@@ -49,21 +49,22 @@ def _fake_client(calls: list, stream: bool = False, reply: str = "ok"):
 def test_registry_contains_preset_providers():
     providers = {p.id: p for p in llm.list_providers()}
     assert set(providers) == {
-        "deepseek",
+        "deepseek-v4f",
         "scnet-glm5base",
         "siliconflow-dsv4f",
         "xiaomi-mimov2.5",
         "xiaomi-mimov2.5pro",
     }
-    assert providers["deepseek"].model == "deepseek-v4-flash"
-    assert providers["deepseek"].base_url == Config.DEEPSEEK_BASE_URL
+    assert providers["deepseek-v4f"].model == "deepseek-v4-flash"
+    assert providers["deepseek-v4f"].base_url == Config.DEEPSEEK_BASE_URL
     assert providers["scnet-glm5base"].model == "GLM-5-Base"
     assert providers["scnet-glm5base"].base_url == "https://api.scnet.cn/api/llm/v1"
 
 
 def test_active_provider_defaults_to_env(monkeypatch):
-    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek")
-    assert llm.get_active_provider().id == "deepseek"
+    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-v4f")
+    assert llm.get_active_provider().id == "deepseek-v4f"
+
 
 
 def test_active_provider_follows_db_setting(scnet_key):
@@ -73,9 +74,9 @@ def test_active_provider_follows_db_setting(scnet_key):
 
 
 def test_active_provider_falls_back_on_invalid_setting(monkeypatch):
-    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek")
+    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-v4f")
     set_setting(llm.SETTING_KEY, "not-a-provider")
-    assert llm.get_active_provider().id == "deepseek"
+    assert llm.get_active_provider().id == "deepseek-v4f"
 
 
 def test_get_client_rejects_missing_key(no_scnet_key):
@@ -87,7 +88,7 @@ def test_get_client_rejects_missing_key(no_scnet_key):
 def test_invoke_uses_active_provider_model(monkeypatch, scnet_key):
     calls: list = []
     monkeypatch.setattr(llm, "get_client", lambda provider=None: _fake_client(calls))
-    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek")
+    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-v4f")
     assert llm.invoke("hi") == "ok"
     assert calls[0]["model"] == "deepseek-v4-flash"
 
