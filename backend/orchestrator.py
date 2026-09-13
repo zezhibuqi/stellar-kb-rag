@@ -330,3 +330,66 @@ def answer_sub_questions(
             results[index]["error"] = "子问题作答超时"
 
     return results
+
+
+# ── 合成：按子问题逐项落位 ────────────────────────────────────────────────
+
+NO_EVIDENCE_NOTE = "未在知识库中找到依据"
+MISSING_ANSWER_NOTE = "该子问题未能作答"
+
+_COVERAGE_LABEL = {
+    COVERAGE_SUFFICIENT: "证据充分",
+    COVERAGE_PARTIAL: "证据部分缺失",
+    COVERAGE_MISSING: "证据缺失",
+}
+
+
+def unresolved_sub_questions(sub_results: list[dict]) -> list[int]:
+    """仍未拿到充分证据（或作答失败）的子问题编号，供合成与提示使用。"""
+    return [
+        item["id"]
+        for item in sub_results
+        if item["coverage"] != COVERAGE_SUFFICIENT or item["error"]
+    ]
+
+
+def build_synthesis_prompt(
+    question: str, sub_results: list[dict], history: list | None = None
+) -> str:
+    blocks: list[str] = []
+    for item in sub_results:
+        if item["error"]:
+            state = f"作答失败（{item['error']}）"
+        else:
+            state = _COVERAGE_LABEL.get(item["coverage"], item["coverage"])
+        block = [
+            f"【子问题 {item['id']}】{item['query']}",
+            f"状态：{state}",
+            f"子答案：{item['answer'] or '（无）'}",
+        ]
+        if item["evidence"]:
+            block.append("依据：" + _format_knowledge_evidence(item["evidence"]))
+        elif item.get("order") and item["order"].get("status") == "ok":
+            block.append("依据：" + order_qa.format_order_context(item["order"]))
+        blocks.append("\n".join(block))
+
+    return (
+        "你是星辰科技集团的内部知识助手。下面是系统对同一个问题的分项调查结果，"
+        "请据此给出最终回答。\n"
+        "要求：\n"
+        "1. 按子问题逐项落位，每一项都要有交代；状态为证据缺失或作答失败的子问题，"
+        f"必须写明「{NO_EVIDENCE_NOTE}」，不得猜测、不得用常识补全。\n"
+        "2. 子答案只是线索，事实以「依据」中的原文为准；回答里出现的数值必须能在依据中"
+        "逐字找到，不要四舍五入或换算单位。\n"
+        "3. 不要罗列子问题编号，用自然的表达组织答案。\n\n"
+        f"{order_qa._format_history(history)}"
+        f"用户问题：{question}\n\n分项调查结果：\n"
+        + "\n\n".join(blocks)
+    )
+
+
+def synthesize(
+    question: str, sub_results: list[dict], history: list | None = None
+) -> str:
+    """非流式合成；流式输出在接口层用同一份 prompt 走 llm.stream。"""
+    return llm.invoke(build_synthesis_prompt(question, sub_results, history))
