@@ -159,6 +159,23 @@ def test_headingless_document_uses_neighbour_blocks_as_evidence_unit():
     assert (text_chunks[1]["parent_start_line"], text_chunks[1]["parent_end_line"]) == (3, 6)
 
 
+def test_text_block_after_blank_line_belongs_to_its_own_section():
+    """表格后的空行会让文本块的首行是空行，章节归属仍须落在自己的标题上。"""
+    md = (
+        "## 第一节\n正文一。\n"
+        "| A | B |\n|---|---|\n| 1 | 2 |\n"
+        "\n"
+        "## 第二节\n正文二。"
+    )
+    chunks = split_markdown(md)
+    last = chunks[-1]
+    assert last["type"] == "text"
+    assert last["parent_type"] == "section"
+    assert (last["parent_start_line"], last["parent_end_line"]) == (7, 8)
+    # 该块本身就含标题，不应再被当作「第 2 段」重复补一次标题
+    assert last["content"].count("## 第二节") == 1
+
+
 def test_evidence_unit_expansion_returns_whole_table_from_any_segment():
     rows = [f"| 产品{i} | 数据{i} |" for i in range(40)]
     md = "## 参数表\n| 产品 | 数据 |\n|---|---|\n" + "\n".join(rows)
