@@ -87,6 +87,18 @@ def _last_heading_index(headings: list[dict], line_no: int) -> int:
     return result
 
 
+def _first_meaningful_line(block: dict) -> int:
+    """块内首个非空行的行号。
+
+    文本块的首行常常是表格之后的空行，若直接用块起始行定位章节，会把该块
+    错判成上一节的一部分；因此章节归属以首个非空行为锚点。
+    """
+    for offset, line in enumerate(block["lines"]):
+        if line.strip():
+            return block["start_line"] + offset
+    return block["start_line"]
+
+
 def _section_end(headings: list[dict], heading_index: int, total_lines: int) -> int:
     """章节结束行：下一个同级或更高级标题之前；没有则到文档末尾。"""
     level = headings[heading_index]["level"]
@@ -116,7 +128,7 @@ def _annotate_blocks(blocks: list[dict], headings: list[dict], lines: list[str])
     """为每个块补上最近标题、表格说明行与证据单元行区间。"""
     total_lines = len(lines)
     for index, block in enumerate(blocks):
-        heading_index = _last_heading_index(headings, block["start_line"])
+        heading_index = _last_heading_index(headings, _first_meaningful_line(block))
         block["heading_index"] = heading_index
         block["heading"] = headings[heading_index] if heading_index >= 0 else None
 
