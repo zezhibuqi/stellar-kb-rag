@@ -35,6 +35,11 @@ COVERAGES = (COVERAGE_SUFFICIENT, COVERAGE_PARTIAL, COVERAGE_MISSING)
 # 单次子答案调用的 token 预算（要在 JSON 里放下答案、覆盖状态与中间实体）
 SUB_ANSWER_MAX_TOKENS = 800
 
+# 规划调用的 token 预算。注意不能沿用提供方的 router_max_tokens（默认 300）：
+# 那是给标准模式的短路由提示词配的，规划提示词更长、输出 JSON 更大，
+# 300 会被推理耗尽并返回空内容（实测 DeepSeek-V4-Flash 即如此）。
+PLAN_MAX_TOKENS = 1200
+
 _PLAN_EXAMPLES = """示例1（并列型，同一实体的多个属性）：
 用户：2025 年动力电池系统的营收 / 占比 / 毛利率 / 销量？
 输出：{"needs_decomposition": true, "intent": "knowledge", "filters": {}, "aggregation": null,
@@ -168,7 +173,7 @@ def plan_question(question: str, history: list | None = None) -> dict:
     prompt = build_plan_prompt(question, history)
     for attempt in range(2):
         try:
-            return _normalize(llm.invoke_json(prompt))
+            return _normalize(llm.invoke_json(prompt, max_tokens=PLAN_MAX_TOKENS))
         except Exception as exc:  # noqa: BLE001 - 规划失败需回退而非中断
             logger.warning("规划解析失败（第 %s 次）：%s", attempt + 1, exc)
     return {

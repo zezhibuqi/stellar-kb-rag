@@ -122,3 +122,16 @@ def test_plan_drops_unknown_dependency(monkeypatch):
         },
     )
     assert plan["sub_questions"][0]["depends_on"] is None
+
+
+def test_plan_requests_its_own_token_budget(monkeypatch):
+    """规划不能沿用提供方的 router_max_tokens（默认 300），否则推理会吃光预算。"""
+    captured = {}
+
+    def fake_invoke_json(prompt, **kwargs):
+        captured.update(kwargs)
+        return {"intent": "knowledge"}
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", fake_invoke_json)
+    orchestrator.plan_question("问题")
+    assert captured["max_tokens"] == orchestrator.PLAN_MAX_TOKENS

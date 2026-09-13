@@ -1,4 +1,4 @@
-"""增强模式演示脚本（设计与开发文档 2.6 / 7.8）。
+r"""增强模式演示脚本（设计与开发文档 2.6 / 7.8）。
 
 用法（在项目根目录执行，需先启动后端并确保当前模型支持增强模式）：
 
@@ -42,9 +42,14 @@ def main() -> None:
     args = parser.parse_args()
 
     headers = {"Authorization": f"Bearer {_login(args.username, args.password)}"}
-    conversation_id = requests.post(
+    created = requests.post(
         f"{BASE}/api/conversations", headers=headers, timeout=10
-    ).json()["id"]
+    )
+    if created.status_code not in (200, 201):
+        print(f"新建会话失败：{created.status_code} {created.text}")
+        print("提示：每用户最多保留 5 个会话（CONVERSATION_LIMIT），先删一个再跑。")
+        return
+    conversation_id = created.json()["id"]
 
     print(f"会话 id={conversation_id}｜模式={args.mode}")
     print(f"问题：{args.question}\n")
