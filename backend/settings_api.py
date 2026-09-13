@@ -23,6 +23,7 @@ def _settings_payload() -> dict:
                 "base_url": provider.base_url,
                 "model": provider.model,
                 "api_key_configured": provider.configured,
+                "agent_capable": provider.agent_capable,
                 "active": provider.id == active.id,
             }
             for provider in llm.list_providers()
