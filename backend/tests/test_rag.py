@@ -10,6 +10,7 @@ import embeddings
 import order_qa
 import rag
 from app import create_app
+from conftest import attach_chat_conversation
 from reranker import RerankerError
 
 
@@ -17,7 +18,7 @@ from reranker import RerankerError
 def client():
     app = create_app()
     app.config["TESTING"] = True
-    return app.test_client()
+    return attach_chat_conversation(app.test_client())
 
 
 @pytest.fixture(autouse=True)
@@ -167,7 +168,10 @@ def test_no_material_returns_fixed_answer(monkeypatch, client):
         json={"question": "不存在的知识"},
     )
     assert resp.status_code == 200
-    assert resp.get_json() == {"answer": "该问题超出我的知识范围", "sources": []}
+    data = resp.get_json()
+    assert data["answer"] == "该问题超出我的知识范围"
+    assert data["sources"] == []
+    assert data["message_id"]
 
 
 def test_reranker_failure_returns_500(monkeypatch, client):
@@ -197,28 +201,33 @@ def test_reranker_failure_returns_500(monkeypatch, client):
 
 
 def test_history_included_in_prompt(monkeypatch, client):
+    """上下文由服务端从会话记录读取：上一轮的问答要出现在本轮 prompt 里。"""
     _seed_docs(monkeypatch, (1, "finance", "2025年净利润为1688万元。"))
-    monkeypatch.setattr(rag, "rerank_top_n", _identity_rerank)
     captured = {}
+    calls = {"n": 0}
+    monkeypatch.setattr(rag, "rerank_top_n", _identity_rerank)
 
     def fake_invoke(prompt: str, **kwargs) -> str:
         captured["prompt"] = prompt
-        return "回答"
+        calls["n"] += 1
+        return "上一轮回答" if calls["n"] == 1 else "回答"
 
     monkeypatch.setattr(rag.llm, "invoke", fake_invoke)
     token = _login(client)
-    resp = client.post(
+    first = client.post(
         "/api/chat",
         headers=_headers(token),
-        json={
-            "question": "依据是什么？",
-            "history": [
-                {"role": "user", "content": "上一轮问题"},
-                {"role": "assistant", "content": "上一轮回答"},
-            ],
-        },
+        json={"question": "上一轮问题"},
     )
-    assert resp.status_code == 200
+    assert first.status_code == 200
+    assert first.get_json()["answer"] == "上一轮回答"
+
+    second = client.post(
+        "/api/chat",
+        headers=_headers(token),
+        json={"question": "依据是什么？"},
+    )
+    assert second.status_code == 200
     prompt = captured["prompt"]
     assert "用户：上一轮问题" in prompt
     assert "助手：上一轮回答" in prompt
@@ -243,10 +252,10 @@ def test_order_route_unauthorized_returns_refusal(monkeypatch, client):
         json={"question": "订单 DD20260315004 完成了吗？"},
     )
     assert resp.status_code == 200
-    assert resp.get_json() == {
-        "answer": order_qa.ORDER_FORBIDDEN_ANSWER,
-        "sources": [],
-    }
+    data = resp.get_json()
+    assert data["answer"] == order_qa.ORDER_FORBIDDEN_ANSWER
+    assert data["sources"] == []
+    assert data["message_id"]
 
 
 def test_order_route_authorized_hit(monkeypatch, client):

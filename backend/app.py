@@ -9,6 +9,7 @@ from flask_cors import CORS
 from auth import auth_bp
 from chat_api import chat_bp
 from config import Config
+from conversations_api import conversations_bp
 from docs_api import docs_bp
 from errors import register_error_handlers
 import llm
@@ -71,6 +72,7 @@ def create_app(config: Config | None = None) -> Flask:
     app.register_blueprint(users_bp)
     app.register_blueprint(docs_bp)
     app.register_blueprint(chat_bp)
+    app.register_blueprint(conversations_bp)
     app.register_blueprint(orders_bp)
     app.register_blueprint(settings_bp)
     return app
