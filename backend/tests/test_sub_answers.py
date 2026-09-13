@@ -132,3 +132,49 @@ def test_no_sub_questions_returns_empty():
     assert (
         orchestrator.answer_sub_questions({}, "问题", _search([]), lambda *a: {}) == []
     )
+
+
+def _round_one_result(key_entities):
+    return {
+        "id": 1,
+        "query": "SC-500 配套 电芯 型号",
+        "source": "knowledge",
+        "answer": "SC-300",
+        "coverage": "sufficient",
+        "evidence_ids": [],
+        "key_entities": key_entities,
+        "evidence": [],
+        "order": None,
+        "error": None,
+    }
+
+
+def _pending():
+    return [
+        {
+            "id": 2,
+            "query": "{1} 单体质量能量密度 25℃ 循环寿命",
+            "source": "knowledge",
+            "filters": {},
+            "aggregation": None,
+            "depends_on": 1,
+        }
+    ]
+
+
+def test_round_two_fills_placeholder_from_key_entities():
+    plan = orchestrator.build_round_two_plan(
+        [_round_one_result(["SC-300"])], [], pending=_pending(), limit=8
+    )
+    assert plan["sub_questions"][0]["query"] == "SC-300 单体质量能量密度 25℃ 循环寿命"
+    assert plan["sub_questions"][0]["follow_up_of"] == 1
+    assert plan["unresolved_pending"] == []
+
+
+def test_round_two_reports_pending_without_entities():
+    pending = _pending()
+    plan = orchestrator.build_round_two_plan(
+        [_round_one_result([])], [], pending=pending, limit=8
+    )
+    assert plan["sub_questions"] == []
+    assert plan["unresolved_pending"] == pending

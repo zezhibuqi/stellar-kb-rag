@@ -92,3 +92,33 @@ def test_plan_single_hop_keeps_fields(monkeypatch):
     assert plan["needs_decomposition"] is False
     assert plan["intent"] == "order"
     assert plan["aggregation"] == "count"
+
+
+def test_plan_keeps_depends_on_for_chain(monkeypatch):
+    plan = _plan(
+        monkeypatch,
+        {
+            "intent": "knowledge",
+            "sub_questions": [
+                {"id": 1, "query": "SC-500 配套 电芯 型号", "source": "knowledge"},
+                {
+                    "id": 2,
+                    "query": "{1} 单体质量能量密度",
+                    "source": "knowledge",
+                    "depends_on": 1,
+                },
+            ],
+        },
+    )
+    assert plan["sub_questions"][1]["depends_on"] == 1
+
+
+def test_plan_drops_unknown_dependency(monkeypatch):
+    plan = _plan(
+        monkeypatch,
+        {
+            "intent": "knowledge",
+            "sub_questions": [{"id": 1, "query": "q", "depends_on": 7}],
+        },
+    )
+    assert plan["sub_questions"][0]["depends_on"] is None

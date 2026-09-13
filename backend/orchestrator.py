@@ -44,11 +44,13 @@ _PLAN_EXAMPLES = """示例1（并列型，同一实体的多个属性）：
         {"id": 3, "query": "2025 动力电池系统 毛利率", "source": "knowledge"},
         {"id": 4, "query": "2025 动力电池系统 销量", "source": "knowledge"}]}
 
-示例2（链式型，第二跳的实体要等第一跳结果才知道）：
+示例2（链式型，第二跳的实体要等第一跳结果才知道；用 {id} 占位并标注 depends_on）：
 用户：为 SC-500 工商业储能一体柜供电的那款电芯，它的单体质量能量密度和 25℃ 循环寿命分别是多少？
 输出：{"needs_decomposition": true, "intent": "knowledge", "filters": {}, "aggregation": null,
       "sub_questions": [
-        {"id": 1, "query": "SC-500 工商业储能一体柜 配套 电芯 型号", "source": "knowledge"}]}
+        {"id": 1, "query": "SC-500 工商业储能一体柜 配套 电芯 型号", "source": "knowledge"},
+        {"id": 2, "query": "{1} 单体质量能量密度 25℃ 循环寿命", "source": "knowledge",
+         "depends_on": 1}]}
 
 示例3（单跳，不拆解）：
 用户：目前未完成的订单有几笔？
@@ -69,8 +71,9 @@ def build_plan_prompt(question: str, history: list | None = None) -> str:
         "2. 每个子问题必须标注数据来源：订单数据库查询用 order（并在该子问题内给出 "
         "filters/aggregation），知识库检索用 knowledge。\n"
         "3. 只有一个信息需求时 needs_decomposition 为 false，sub_questions 留空数组。\n"
-        "4. 后续子问题依赖前面结果的链式问题，只输出当前能确定的第一步，"
-        "后续步骤由系统在拿到中间结果后再查。\n"
+        "4. 链式问题（后续步骤依赖前面结果的）分两步表达：第一步写成正常子问题；"
+        "后续步骤写成待定子问题，query 里用 {前一步的 id} 占位表示未知实体，"
+        "并标注 depends_on；系统会在拿到第一步的中间实体后填实占位再检索。\n"
         "5. 只抽取问题中明确给出的条件，不得脑补；拿不准一律按 knowledge 处理。\n"
         "只输出 JSON，不要输出任何其他文字。\n"
         f"{_PLAN_EXAMPLES}\n\n历史对话：\n{order_qa._format_history(history)}"
@@ -98,12 +101,16 @@ def _sanitize_sub_question(raw, index: int) -> dict | None:
     source = raw.get("source")
     if source not in SOURCES:
         source = SOURCE_KNOWLEDGE
+    depends_on = raw.get("depends_on")
+    if not isinstance(depends_on, int) or isinstance(depends_on, bool):
+        depends_on = None
     return {
         "id": index,
         "query": query,
         "source": source,
         "filters": _clean_filters(raw.get("filters")),
         "aggregation": _clean_aggregation(raw.get("aggregation")),
+        "depends_on_raw": depends_on,
     }
 
 
@@ -117,10 +124,26 @@ def _normalize(data: dict) -> dict:
         raise ValueError("sub_questions 必须为数组")
 
     sub_questions: list[dict] = []
+    raw_to_assigned: dict[int, int] = {}
     for raw in raw_sub_questions:
         item = _sanitize_sub_question(raw, len(sub_questions) + 1)
-        if item is not None:
-            sub_questions.append(item)
+        if item is None:
+            continue
+        raw_id = raw.get("id") if isinstance(raw, dict) else None
+        if isinstance(raw_id, int) and not isinstance(raw_id, bool):
+            raw_to_assigned[raw_id] = item["id"]
+        sub_questions.append(item)
+
+    # 依赖解析：模型可能用自己给的编号，也可能用本系统的编号
+    assigned_ids = {item["id"] for item in sub_questions}
+    for item in sub_questions:
+        dependency = item.pop("depends_on_raw")
+        mapped = raw_to_assigned.get(dependency, dependency)
+        item["depends_on"] = (
+            mapped
+            if mapped in assigned_ids and mapped != item["id"] and dependency is not None
+            else None
+        )
 
     limit = Config.AGENT_MAX_SUB_QUESTIONS
     truncated = max(0, len(sub_questions) - limit)
@@ -412,32 +435,72 @@ def _event(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-def build_round_two_plan(
-    sub_results: list[dict], unresolved_ids: list[int], limit: int | None = None
-) -> dict:
-    """第二轮：用第一轮的关键实体构造检索式，补齐缺失证据（链式问题的第二跳）。
+def _fill_placeholder(query: str, dependency_id, entity: str) -> str:
+    placeholder = "{" + str(dependency_id) + "}"
+    if placeholder in query:
+        return query.replace(placeholder, entity)
+    return f"{entity} {query}"
 
-    查询式取中间实体本身，取回该实体的规格证据，具体属性由合成步按原问题挑选。
+
+def build_round_two_plan(
+    sub_results: list[dict],
+    unresolved_ids: list[int],
+    pending: list[dict] | None = None,
+    limit: int | None = None,
+) -> dict:
+    """第二轮计划，由两部分组成：
+
+    1. **链式延伸**：规划阶段留下的待定子问题（带 depends_on），用依赖子问题的
+       中间实体填实占位符后执行——这正是链式问题的第二跳。
+    2. **缺口补充**：对覆盖为部分/缺失的子问题，直接用其关键实体再查一轮。
+
+    待定项若无法展开（依赖无结果或没有中间实体），会在 unresolved_pending 里返回，
+    由调用方作为「证据缺失」写入结果，避免静默漏项。
     """
     sub_questions: list[dict] = []
+    unresolved_pending: list[dict] = []
     offset = len(sub_results)
+    results_by_id = {item["id"]: item for item in sub_results}
+
+    def add(query: str, follow_up_of) -> None:
+        sub_questions.append(
+            {
+                "id": offset + len(sub_questions) + 1,
+                "query": query,
+                "source": SOURCE_KNOWLEDGE,
+                "filters": {},
+                "aggregation": None,
+                "follow_up_of": follow_up_of,
+            }
+        )
+
+    for item in pending or []:
+        dependency = results_by_id.get(item.get("depends_on"))
+        entities = dependency["key_entities"] if dependency else []
+        if not entities:
+            unresolved_pending.append(item)
+            continue
+        for entity in entities[:2]:
+            if limit is not None and len(sub_questions) >= limit:
+                unresolved_pending.append(item)
+                break
+            add(_fill_placeholder(item["query"], item.get("depends_on"), entity), item.get("depends_on"))
+
     for item in sub_results:
         if item["id"] not in unresolved_ids:
             continue
         for entity in item["key_entities"][:2]:
             if limit is not None and len(sub_questions) >= limit:
-                return {"sub_questions": sub_questions}
-            sub_questions.append(
-                {
-                    "id": offset + len(sub_questions) + 1,
-                    "query": entity,
-                    "source": SOURCE_KNOWLEDGE,
-                    "filters": {},
-                    "aggregation": None,
-                    "follow_up_of": item["id"],
+                return {
+                    "sub_questions": sub_questions,
+                    "unresolved_pending": unresolved_pending,
                 }
-            )
-    return {"sub_questions": sub_questions}
+            add(entity, item["id"])
+
+    return {
+        "sub_questions": sub_questions,
+        "unresolved_pending": unresolved_pending,
+    }
 
 
 def collect_sources(sub_results: list[dict]) -> list[dict]:
@@ -540,18 +603,33 @@ def run_enhanced(
         return
 
     sub_questions = plan["sub_questions"]
+    pending = [item for item in sub_questions if item.get("depends_on")]
+    immediate = [item for item in sub_questions if not item.get("depends_on")]
+    if not immediate:
+        # 规划只给了依赖子问题（异常情况）：全部按第一轮执行，避免空转
+        immediate, pending = sub_questions, []
     yield _event(
         {
             "stage": "planned",
             "sub_questions": [
-                {"id": item["id"], "text": item["query"]} for item in sub_questions
+                {
+                    "id": item["id"],
+                    "text": item["query"],
+                    "depends_on": item.get("depends_on"),
+                }
+                for item in sub_questions
             ],
         }
     )
 
     state = new_evidence_state()
     results = answer_sub_questions(
-        plan, question, search_tool, order_tool, history, state
+        {"sub_questions": immediate},
+        question,
+        search_tool,
+        order_tool,
+        history,
+        state,
     )
     for item in results:
         yield _event(
@@ -565,26 +643,32 @@ def run_enhanced(
 
     round_two_count = 0
     unresolved = unresolved_sub_questions(results)
-    if unresolved:
-        round_two_plan = build_round_two_plan(
-            results, unresolved, limit=Config.AGENT_MAX_SUB_QUESTIONS
+    round_two_plan = build_round_two_plan(
+        results,
+        unresolved,
+        pending=pending,
+        limit=Config.AGENT_MAX_SUB_QUESTIONS,
+    )
+    # 待定项没能展开（依赖无结果或没有中间实体）时按证据缺失写入结果，
+    # 让合成阶段显式说明该部分没有依据
+    for item in round_two_plan["unresolved_pending"]:
+        results.append(_base_result(item))
+    if round_two_plan["sub_questions"]:
+        round_two_count = len(round_two_plan["sub_questions"])
+        extra_results = answer_sub_questions(
+            round_two_plan, question, search_tool, order_tool, history, state
         )
-        if round_two_plan["sub_questions"]:
-            round_two_count = len(round_two_plan["sub_questions"])
-            extra_results = answer_sub_questions(
-                round_two_plan, question, search_tool, order_tool, history, state
+        results.extend(extra_results)
+        for item in extra_results:
+            yield _event(
+                {
+                    "stage": "sub_answer",
+                    "sub_question_id": item["id"],
+                    "answer": item["answer"],
+                    "coverage": item["coverage"],
+                    "follow_up": True,
+                }
             )
-            results.extend(extra_results)
-            for item in extra_results:
-                yield _event(
-                    {
-                        "stage": "sub_answer",
-                        "sub_question_id": item["id"],
-                        "answer": item["answer"],
-                        "coverage": item["coverage"],
-                        "follow_up": True,
-                    }
-                )
 
     if trace_out is not None:
         trace_out.update(

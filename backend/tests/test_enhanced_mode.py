@@ -224,3 +224,83 @@ def test_planner_fallback_prefixes_and_keeps_standard_answer(monkeypatch, client
         f"/api/conversations/{conversation_id}/messages", headers=_headers(token)
     ).get_json()
     assert messages[1]["trace"]["fallback"] is True
+
+
+def test_chain_triggers_round_two_even_when_round_one_succeeds(monkeypatch, client):
+    """链式问题的第二跳由 depends_on 占位符驱动，与第一轮覆盖是否充分无关。"""
+    monkeypatch.setattr(
+        llm, "get_active_provider", lambda: SimpleNamespace(agent_capable=True)
+    )
+    plan = {
+        "needs_decomposition": True,
+        "intent": "knowledge",
+        "filters": {},
+        "aggregation": None,
+        "sub_questions": [
+            {
+                "id": 1,
+                "query": "SC-500 工商业储能一体柜 配套 电芯 型号",
+                "source": "knowledge",
+                "filters": {},
+                "aggregation": None,
+                "depends_on": None,
+            },
+            {
+                "id": 2,
+                "query": "{1} 单体质量能量密度 25℃ 循环寿命",
+                "source": "knowledge",
+                "filters": {},
+                "aggregation": None,
+                "depends_on": 1,
+            },
+        ],
+        "truncated": 0,
+        "fallback": False,
+    }
+    monkeypatch.setattr(orchestrator, "plan_question", lambda q, history=None: plan)
+    monkeypatch.setattr(
+        orchestrator,
+        "answer_sub_questions",
+        lambda sub_plan, *a, **k: [
+            {
+                "id": item["id"],
+                "query": item["query"],
+                "source": item["source"],
+                "answer": "SC-300",
+                "coverage": "sufficient",
+                "evidence_ids": [],
+                "key_entities": ["SC-300"],
+                "evidence": [],
+                "order": None,
+                "error": None,
+            }
+            for item in sub_plan["sub_questions"]
+        ],
+    )
+    monkeypatch.setattr(orchestrator.llm, "stream", lambda *a, **k: iter(["答"]))
+
+    token = _login(client)
+    conversation_id = _new_conversation(client, token)
+    resp = client.post(
+        "/api/chat",
+        headers=_headers(token),
+        json={
+            "conversation_id": conversation_id,
+            "mode": "enhanced",
+            "stream": True,
+            "question": "为 SC-500 供电的那款电芯，它的单体质量能量密度和 25℃ 循环寿命分别是多少？",
+        },
+    )
+    body = resp.get_data(as_text=True)
+    assert '"follow_up": true' in body
+
+    messages = client.get(
+        f"/api/conversations/{conversation_id}/messages", headers=_headers(token)
+    ).get_json()
+    trace = messages[1]["trace"]
+    assert trace["rounds"] == 2
+    assert trace["round_two_sub_questions"] == 1
+    assert (
+        trace["sub_questions"][1]["query"]
+        == "SC-300 单体质量能量密度 25℃ 循环寿命"
+    )
