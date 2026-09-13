@@ -170,6 +170,23 @@ def test_upload_pipeline_ingests_to_chroma(monkeypatch, client):
     assert {meta["chunk_type"] for meta in metadatas} == {"text", "table"}
     assert {meta["start_line"] for meta in metadatas} == {1, 3}
 
+    # 证据单元行区间随灌库写入（ADR 0009）
+    table_meta = next(meta for meta in metadatas if meta["chunk_type"] == "table")
+    assert table_meta["parent_type"] == "table"
+    assert (table_meta["parent_start_line"], table_meta["parent_end_line"]) == (3, 5)
+    text_meta = next(meta for meta in metadatas if meta["chunk_type"] == "text")
+    assert text_meta["parent_type"] == "section"
+    assert (text_meta["parent_start_line"], text_meta["parent_end_line"]) == (1, 5)
+
+    # 表格块入库文本带上下文前缀（最近标题 + 表格上方最近的非空非表格行）
+    stored = chroma_store.get_collection().get(where={"doc_id": doc_id})
+    table_text = next(
+        text
+        for meta, text in zip(stored["metadatas"], stored["documents"])
+        if meta["chunk_type"] == "table"
+    )
+    assert table_text.startswith("## 营收概览\n2024年营收稳步增长。\n| 产品 | 营收 |")
+
 
 def test_delete_document_clears_vectors(monkeypatch, client):
     monkeypatch.setattr(

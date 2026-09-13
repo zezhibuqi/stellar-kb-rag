@@ -1,7 +1,9 @@
-"""Stage 4 切片器测试：纯文本、纯表格、混合、超长表格与表头边界。"""
+"""切片器测试：切分、上下文前缀与证据单元（设计文档 7.1 / ADR 0009）。"""
 
 import logging
 
+from chroma_store import evidence_unit_key, expand_evidence_unit
+from models import create_document
 from splitter import split_markdown
 
 
@@ -15,7 +17,13 @@ def test_pure_text_splits_into_text_chunks():
 def test_pure_table_kept_whole():
     table = "| 型号 | 容量 |\n|---|---|\n| SC-100 | 100Ah |"
     chunks = split_markdown(table)
-    assert chunks == [{"type": "table", "content": table, "start_line": 1}]
+    assert len(chunks) == 1
+    chunk = chunks[0]
+    assert chunk["type"] == "table"
+    assert chunk["content"] == table  # 无标题也无说明行 → 不加前缀
+    assert chunk["start_line"] == 1
+    assert chunk["parent_type"] == "table"
+    assert (chunk["parent_start_line"], chunk["parent_end_line"]) == (1, 3)
 
 
 def test_mixed_text_and_table():
@@ -25,8 +33,10 @@ def test_mixed_text_and_table():
     assert "text" in types
     assert "table" in types
     table_chunk = next(chunk for chunk in chunks if chunk["type"] == "table")
-    assert table_chunk["content"].startswith("| A | B |")
+    # 前缀 = 最近标题 + 表格上方最近的非空非表格行
+    assert table_chunk["content"] == "## 概述\n这是文本。\n| A | B |\n|---|---|\n| 1 | 2 |"
     assert table_chunk["start_line"] == 3
+    assert table_chunk["parent_type"] == "table"
 
 
 def test_oversized_table_split_with_header():
@@ -77,3 +87,109 @@ def test_table_start_line_after_text():
     chunks = split_markdown(md)
     table_chunk = next(chunk for chunk in chunks if chunk["type"] == "table")
     assert table_chunk["start_line"] == 3
+
+
+def _only_table(md: str, **kwargs) -> dict:
+    chunks = split_markdown(md, **kwargs)
+    tables = [chunk for chunk in chunks if chunk["type"] == "table"]
+    assert len(tables) == 1
+    return tables[0]
+
+
+def test_caption_taken_across_blank_lines():
+    """表格上方的说明行（表名/单位）与表格之间隔空行时仍要取到。"""
+    md = "## 营收概况\n\n单位：万元\n\n| 项目 | 营收 |\n|---|---|\n| 动力电池 | 100 |"
+    chunk = _only_table(md)
+    assert chunk["content"].startswith("## 营收概况\n单位：万元\n| 项目 | 营收 |")
+
+
+def test_caption_not_duplicated_when_line_above_is_heading():
+    """表格上方直接是标题时不重复拼接，前缀只保留最近标题。"""
+    md = "## 营收概况\n### 分产品\n| 项目 | 营收 |\n|---|---|\n| 动力电池 | 100 |"
+    chunk = _only_table(md)
+    assert chunk["content"] == "### 分产品\n| 项目 | 营收 |\n|---|---|\n| 动力电池 | 100 |"
+
+
+def test_table_at_document_start_has_no_prefix():
+    md = "| 项目 | 营收 |\n|---|---|\n| 动力电池 | 100 |"
+    chunk = _only_table(md)
+    assert chunk["content"] == md
+    assert (chunk["parent_start_line"], chunk["parent_end_line"]) == (1, 3)
+
+
+def test_table_with_heading_only():
+    """只有标题、没有说明行的表格：前缀就是标题本身。"""
+    md = "## 概况\n| A | B |\n|---|---|\n| 1 | 2 |"
+    chunk = _only_table(md)
+    assert chunk["content"] == "## 概况\n| A | B |\n|---|---|\n| 1 | 2 |"
+
+
+def test_oversized_table_every_segment_carries_prefix():
+    rows = [f"| 产品{i} | 数据{i} |" for i in range(30)]
+    md = "## 产品参数表\n\n| 产品 | 数据 |\n|---|---|\n" + "\n".join(rows)
+    table_chunks = [
+        chunk for chunk in split_markdown(md, chunk_size=120) if chunk["type"] == "table"
+    ]
+    assert len(table_chunks) > 1
+    for chunk in table_chunks:
+        assert chunk["content"].startswith("## 产品参数表\n| 产品 | 数据 |\n|---|---|\n")
+        assert chunk["content"].count("|---|---|") == 1, "分隔行不得重复"
+
+
+def test_long_section_only_later_text_chunks_get_heading():
+    """同一章节内第 1 段本就含标题，第 2 段及以后才补标题。"""
+    body = "\n".join(f"第{i}行：" + "这是一段很长的文本内容。" * 8 for i in range(60))
+    md = "## 详细说明\n" + body
+    chunks = split_markdown(md, chunk_size=200, chunk_overlap=20)
+    assert len(chunks) >= 2
+    assert chunks[0]["content"].lstrip().startswith("## 详细说明")
+    assert not chunks[0]["content"].startswith("## 详细说明\n## 详细说明")
+    for chunk in chunks[1:]:
+        assert chunk["content"].startswith("## 详细说明\n")
+
+
+def test_headingless_document_uses_neighbour_blocks_as_evidence_unit():
+    """无标题文档：证据单元退化为「命中块 + 前后各一个相邻块」。"""
+    md = "第一段文本。\n\n| A | B |\n|---|---|\n| 1 | 2 |\n最后一段文本。"
+    chunks = split_markdown(md)
+    text_chunks = [chunk for chunk in chunks if chunk["type"] == "text"]
+    assert len(text_chunks) == 2
+    assert all(chunk["parent_type"] == "section" for chunk in text_chunks)
+    assert (text_chunks[0]["parent_start_line"], text_chunks[0]["parent_end_line"]) == (1, 5)
+    assert (text_chunks[1]["parent_start_line"], text_chunks[1]["parent_end_line"]) == (3, 6)
+
+
+def test_evidence_unit_expansion_returns_whole_table_from_any_segment():
+    rows = [f"| 产品{i} | 数据{i} |" for i in range(40)]
+    md = "## 参数表\n| 产品 | 数据 |\n|---|---|\n" + "\n".join(rows)
+    doc_id = create_document("参数表.md", "product", source_content=md)
+    table_chunks = [
+        chunk for chunk in split_markdown(md, chunk_size=120) if chunk["type"] == "table"
+    ]
+    assert len(table_chunks) > 1
+
+    expected_table = md.split("\n", 1)[1]
+    keys = set()
+    for chunk in table_chunks:
+        expanded = expand_evidence_unit(
+            doc_id,
+            chunk["parent_start_line"],
+            chunk["parent_end_line"],
+            chunk["start_line"],
+        )
+        assert expanded == expected_table
+        keys.add(evidence_unit_key(doc_id, chunk["parent_start_line"], chunk["parent_end_line"]))
+    assert len(keys) == 1, "同一张表的多个分段必须归为同一个证据单元"
+
+
+def test_evidence_unit_expansion_truncates_around_hit():
+    md = "\n".join(f"第{i}行的内容" for i in range(1, 101))
+    doc_id = create_document("长文档.md", "common", source_content=md)
+    text = expand_evidence_unit(doc_id, 1, 100, hit_start_line=80, max_chars=100)
+    assert "第80行的内容" in text
+    assert "第1行的内容" not in text
+    assert len(text) <= 100
+
+
+def test_evidence_unit_expansion_missing_document():
+    assert expand_evidence_unit(9999, 1, 10, 1) == ""
