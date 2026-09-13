@@ -76,6 +76,13 @@ def main() -> None:
     me = requests.get(f"{BASE}/api/auth/me", headers=user_headers, timeout=10).json()
     _check("me 返回正确角色", me["role"] == "employee", me["username"])
 
+    # 会话：V2.0 起问答必须挂在会话上
+    resp = requests.post(f"{BASE}/api/conversations", headers=admin_headers, timeout=10)
+    _check("admin 新建会话", resp.status_code == 201, resp.text)
+    admin_conversation = resp.json()["id"]
+    resp = requests.post(f"{BASE}/api/conversations", headers=user_headers, timeout=10)
+    user_conversation = resp.json()["id"]
+
     # 4. 上传文档
     file_path = Path(args.file)
     with open(file_path, "rb") as f:
@@ -107,7 +114,11 @@ def main() -> None:
     resp = requests.post(
         f"{BASE}/api/chat",
         headers=admin_headers,
-        json={"question": question, "stream": False},
+        json={
+            "conversation_id": admin_conversation,
+            "question": question,
+            "stream": False,
+        },
         timeout=120,
     )
     answer = resp.json().get("answer", "")
@@ -122,7 +133,11 @@ def main() -> None:
     resp = requests.post(
         f"{BASE}/api/chat",
         headers=admin_headers,
-        json={"question": question, "stream": True},
+        json={
+            "conversation_id": admin_conversation,
+            "question": question,
+            "stream": True,
+        },
         timeout=180,
         stream=True,
     )
@@ -146,7 +161,11 @@ def main() -> None:
     resp = requests.post(
         f"{BASE}/api/chat",
         headers=user_headers,
-        json={"question": "2025年净利润是多少？", "stream": False},
+        json={
+            "conversation_id": user_conversation,
+            "question": "2025年净利润是多少？",
+            "stream": False,
+        },
         timeout=120,
     )
     domains = {source["domain"] for source in resp.json()["sources"]}

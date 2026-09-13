@@ -299,6 +299,49 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface ConversationInfo {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoredMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  mode: string;
+  status: "streaming" | "completed" | "failed" | "aborted";
+  sources: ChatSource[];
+  trace: unknown;
+  created_at: string;
+}
+
+export function listConversations(): Promise<ConversationInfo[]> {
+  return request<ConversationInfo[]>("/api/conversations");
+}
+
+export function createConversation(): Promise<{ id: number; title: string }> {
+  return request<{ id: number; title: string }>("/api/conversations", {
+    method: "POST",
+  });
+}
+
+export function listConversationMessages(
+  conversationId: number
+): Promise<StoredMessage[]> {
+  return request<StoredMessage[]>(`/api/conversations/${conversationId}/messages`);
+}
+
+export function deleteConversation(
+  conversationId: number
+): Promise<{ id: number; deleted: boolean }> {
+  return request<{ id: number; deleted: boolean }>(
+    `/api/conversations/${conversationId}`,
+    { method: "DELETE" }
+  );
+}
+
 export interface ChatSource {
   filename: string;
   domain: string;
@@ -321,20 +364,29 @@ export interface ChatResponse {
   sources: ChatSource[];
 }
 
-export function chat(question: string, history: ChatMessage[]): Promise<ChatResponse> {
+export function chat(conversationId: number, question: string): Promise<ChatResponse> {
   return request<ChatResponse>("/api/chat", {
     method: "POST",
-    body: JSON.stringify({ question, history, stream: false }),
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      question,
+      stream: false,
+    }),
   });
 }
 
+export interface ChatStreamHandlers {
+  onToken: (token: string) => void;
+  onDone: (sources: ChatSource[]) => void;
+  onMessageId?: (messageId: number) => void;
+  onError?: (error: string) => void;
+}
+
 export async function chatStream(
+  conversationId: number,
   question: string,
-  history: ChatMessage[],
-  onToken: (token: string) => void,
-  onDone: (sources: ChatSource[]) => void,
-  signal?: AbortSignal,
-  onError?: (error: string) => void
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const token = getToken();
@@ -345,7 +397,7 @@ export async function chatStream(
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ question, history, stream: true }),
+    body: JSON.stringify({ conversation_id: conversationId, question, stream: true }),
     signal,
   });
   if (!response.ok || !response.body) {
@@ -372,14 +424,17 @@ export async function chatStream(
       if (!raw.startsWith("data: ")) continue;
       try {
         const event = JSON.parse(raw.slice(6)) as Record<string, unknown>;
+        if (typeof event.message_id === "number") {
+          handlers.onMessageId?.(event.message_id);
+        }
         if (typeof event.token === "string") {
-          onToken(event.token);
+          handlers.onToken(event.token);
         }
         if (typeof event.error === "string") {
-          onError?.(event.error);
+          handlers.onError?.(event.error);
         }
         if (event.done) {
-          onDone((event.sources as ChatSource[]) ?? []);
+          handlers.onDone((event.sources as ChatSource[]) ?? []);
         }
       } catch {
         // 忽略无法解析的事件
