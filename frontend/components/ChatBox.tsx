@@ -13,6 +13,7 @@ import {
   createConversation,
   listConversationMessages,
   type ChatSource,
+  type ConversationInfo,
   type StoredMessage,
 } from "@/lib/api";
 
@@ -82,6 +83,24 @@ export default function ChatBox() {
       );
     }
   }, []);
+
+  const autoSelected = useRef(false);
+
+  /** 首次加载会话列表时自动选中最近更新的那个 */
+  const handleLoaded = useCallback(
+    (list: ConversationInfo[]) => {
+      if (autoSelected.current) return;
+      autoSelected.current = true;
+      if (list.length > 0) void openConversation(list[0].id);
+    },
+    [openConversation]
+  );
+
+  const handleDeleted = (id: number) => {
+    if (conversationId !== id) return;
+    setConversationId(null);
+    setItems([]);
+  };
 
   const startConversation = async () => {
     try {
@@ -161,24 +180,14 @@ export default function ChatBox() {
     <ConversationList
       activeId={conversationId}
       onSelect={openConversation}
+      onLoaded={handleLoaded}
+      onDeleted={handleDeleted}
       refreshToken={listToken}
     />
   );
 
   return (
     <div style={{ display: "flex", height: "100%", width: "100%" }}>
-      {!isNarrow && (
-        <div
-          style={{
-            width: 240,
-            flex: "none",
-            height: "100%",
-            borderRight: "1px solid var(--app-card-border)",
-          }}
-        >
-          {sidebar}
-        </div>
-      )}
       <div
         style={{
           flex: 1,
@@ -191,7 +200,14 @@ export default function ChatBox() {
         }}
       >
         {isNarrow && (
-          <div style={{ flex: "none", paddingTop: 10 }}>
+          <div
+            style={{
+              flex: "none",
+              paddingTop: 10,
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
             <Button
               size="small"
               icon={<MenuOutlined />}
@@ -302,9 +318,21 @@ export default function ChatBox() {
           </Typography.Paragraph>
         </div>
       </div>
+      {!isNarrow && (
+        <div
+          style={{
+            width: 240,
+            flex: "none",
+            height: "100%",
+            borderLeft: "1px solid var(--app-card-border)",
+          }}
+        >
+          {sidebar}
+        </div>
+      )}
       <Drawer
         title="会话"
-        placement="left"
+        placement="right"
         width={260}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}

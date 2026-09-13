@@ -16,11 +16,21 @@ const CONVERSATION_LIMIT = 5;
 interface Props {
   activeId: number | null;
   onSelect: (id: number) => void;
+  /** 列表加载完成（父组件据此自动选中最近更新的会话） */
+  onLoaded?: (conversations: ConversationInfo[]) => void;
+  /** 某个会话被删除（父组件据此清掉当前选中） */
+  onDeleted?: (id: number) => void;
   /** 外部触发刷新（例如回答结束后标题与排序变化） */
   refreshToken?: number;
 }
 
-export default function ConversationList({ activeId, onSelect, refreshToken }: Props) {
+export default function ConversationList({
+  activeId,
+  onSelect,
+  onLoaded,
+  onDeleted,
+  refreshToken,
+}: Props) {
   const [conversations, setConversations] = useState<ConversationInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -28,7 +38,9 @@ export default function ConversationList({ activeId, onSelect, refreshToken }: P
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      setConversations(await listConversations());
+      const list = await listConversations();
+      setConversations(list);
+      onLoaded?.(list);
     } catch (error) {
       message.error(
         error instanceof ApiRequestError ? error.message : "加载会话失败"
@@ -36,7 +48,7 @@ export default function ConversationList({ activeId, onSelect, refreshToken }: P
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onLoaded]);
 
   useEffect(() => {
     reload();
@@ -63,6 +75,7 @@ export default function ConversationList({ activeId, onSelect, refreshToken }: P
     try {
       await deleteConversation(id);
       message.success("会话已删除");
+      onDeleted?.(id);
       await reload();
     } catch (error) {
       message.error(
