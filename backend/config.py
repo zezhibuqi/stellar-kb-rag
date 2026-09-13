@@ -56,6 +56,9 @@ class Config:
     MAX_CHUNK_SIZE = int(os.getenv("MAX_CHUNK_SIZE", "1024"))
     MAX_CHUNK_OVERLAP = int(os.getenv("MAX_CHUNK_OVERLAP", "50"))
 
+    # 证据单元（ADR 0009：注入上下文的原文范围上限）
+    AGENT_EVIDENCE_MAX_CHARS = int(os.getenv("AGENT_EVIDENCE_MAX_CHARS", "3000"))
+
     # 上传限制
     UPLOAD_MAX_SIZE_MB = int(os.getenv("UPLOAD_MAX_SIZE_MB", "10"))
 
