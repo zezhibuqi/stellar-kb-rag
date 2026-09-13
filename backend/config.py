@@ -59,6 +59,9 @@ class Config:
     # 证据单元（ADR 0009：注入上下文的原文范围上限）
     AGENT_EVIDENCE_MAX_CHARS = int(os.getenv("AGENT_EVIDENCE_MAX_CHARS", "3000"))
 
+    # 会话上下文（服务端统一截取的轮数）
+    CHAT_HISTORY_TURNS = int(os.getenv("CHAT_HISTORY_TURNS", "10"))
+
     # 上传限制
     UPLOAD_MAX_SIZE_MB = int(os.getenv("UPLOAD_MAX_SIZE_MB", "10"))
 

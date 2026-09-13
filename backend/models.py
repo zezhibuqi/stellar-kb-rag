@@ -68,10 +68,36 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- 会话（每用户最多保留 CONVERSATION_LIMIT 个，见设计文档 2.7）
+CREATE TABLE IF NOT EXISTS conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 会话消息（含所用模式、状态与增强模式的过程记录）
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,                        -- user | assistant
+    content TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'standard',     -- standard | enhanced
+    status TEXT NOT NULL DEFAULT 'completed',  -- streaming | completed | failed | aborted
+    sources_json TEXT,                         -- 引用来源数组（含 sub_question_id）
+    trace_json TEXT,                           -- 增强模式过程记录
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
 """
 
 ROLE_VALUES = ("employee", "finance", "sales", "aftersale", "admin")
 DOCUMENT_STATUSES = ("pending", "processing", "completed", "failed")
+CONVERSATION_LIMIT = 5
+MESSAGE_STATUSES = ("streaming", "completed", "failed", "aborted")
 DEFAULT_PASSWORD = "123456"
 
 DOMAINS = [
@@ -443,3 +469,164 @@ def set_setting(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+
+# ── 会话与消息（设计文档 2.7 / 6.9）────────────────────────────────────────
+
+
+def count_conversations(user_id: int) -> int:
+    with transaction() as cur:
+        row = cur.execute(
+            "SELECT COUNT(*) AS c FROM conversations WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return int(row["c"])
+
+
+def create_conversation(user_id: int, title: str = "") -> int:
+    """新建会话；超过每用户上限时抛 ValueError。"""
+    with transaction() as cur:
+        row = cur.execute(
+            "SELECT COUNT(*) AS c FROM conversations WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if int(row["c"]) >= CONVERSATION_LIMIT:
+            raise ValueError(f"最多保留 {CONVERSATION_LIMIT} 个会话，请先删除一个")
+        cur.execute(
+            "INSERT INTO conversations (user_id, title) VALUES (?, ?)",
+            (user_id, title),
+        )
+        return int(cur.lastrowid)
+
+
+def list_conversations(user_id: int) -> list[dict[str, Any]]:
+    with transaction() as cur:
+        rows = cur.execute(
+            "SELECT id, title, created_at, updated_at FROM conversations "
+            "WHERE user_id = ? ORDER BY updated_at DESC, id DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_conversation(conversation_id: int) -> dict[str, Any] | None:
+    with transaction() as cur:
+        row = cur.execute(
+            "SELECT id, user_id, title, created_at, updated_at FROM conversations "
+            "WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_conversation_title(conversation_id: int, title: str) -> bool:
+    with transaction() as cur:
+        cur.execute(
+            "UPDATE conversations SET title = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE id = ?",
+            (title, conversation_id),
+        )
+        return cur.rowcount > 0
+
+
+def touch_conversation(conversation_id: int) -> None:
+    """刷新会话更新时间（新消息落库后调用）。"""
+    with transaction() as cur:
+        cur.execute(
+            "UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (conversation_id,),
+        )
+
+
+def delete_conversation(conversation_id: int) -> bool:
+    """删除会话；消息由外键级联删除（连接已开启 PRAGMA foreign_keys=ON）。"""
+    with transaction() as cur:
+        cur.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        return cur.rowcount > 0
+
+
+def create_message(
+    conversation_id: int,
+    role: str,
+    content: str = "",
+    mode: str = "standard",
+    status: str = "completed",
+    sources_json: str | None = None,
+    trace_json: str | None = None,
+) -> int:
+    if status not in MESSAGE_STATUSES:
+        raise ValueError(f"非法消息状态：{status}")
+    with transaction() as cur:
+        cur.execute(
+            "INSERT INTO messages (conversation_id, role, content, mode, status, "
+            "sources_json, trace_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (conversation_id, role, content, mode, status, sources_json, trace_json),
+        )
+        return int(cur.lastrowid)
+
+
+def update_message(
+    message_id: int,
+    content: str | None = None,
+    status: str | None = None,
+    sources_json: str | None = None,
+    trace_json: str | None = None,
+) -> bool:
+    fields: list[str] = []
+    params: list[Any] = []
+    if content is not None:
+        fields.append("content = ?")
+        params.append(content)
+    if status is not None:
+        if status not in MESSAGE_STATUSES:
+            raise ValueError(f"非法消息状态：{status}")
+        fields.append("status = ?")
+        params.append(status)
+    if sources_json is not None:
+        fields.append("sources_json = ?")
+        params.append(sources_json)
+    if trace_json is not None:
+        fields.append("trace_json = ?")
+        params.append(trace_json)
+    if not fields:
+        return False
+    params.append(message_id)
+    with transaction() as cur:
+        cur.execute(f"UPDATE messages SET {', '.join(fields)} WHERE id = ?", params)
+        return cur.rowcount > 0
+
+
+def get_message(message_id: int) -> dict[str, Any] | None:
+    with transaction() as cur:
+        row = cur.execute(
+            "SELECT id, conversation_id, role, content, mode, status, "
+            "sources_json, trace_json, created_at FROM messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_messages(conversation_id: int) -> list[dict[str, Any]]:
+    with transaction() as cur:
+        rows = cur.execute(
+            "SELECT id, role, content, mode, status, sources_json, trace_json, "
+            "created_at FROM messages WHERE conversation_id = ? ORDER BY id",
+            (conversation_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def recent_context_messages(conversation_id: int, turns: int) -> list[dict[str, Any]]:
+    """最近 N 轮的问答文本（按时间正序），供服务端拼上下文。
+
+    只取已完成且内容非空的消息；失败与中断的消息不计入。
+    """
+    limit = max(turns, 0) * 2
+    if limit == 0:
+        return []
+    with transaction() as cur:
+        rows = cur.execute(
+            "SELECT id, role, content FROM messages "
+            "WHERE conversation_id = ? AND status = 'completed' AND content <> '' "
+            "ORDER BY id DESC LIMIT ?",
+            (conversation_id, limit),
+        ).fetchall()
+        return [dict(row) for row in reversed(rows)]

@@ -10,13 +10,14 @@ import embeddings
 import order_qa
 import rag
 from app import create_app
+from conftest import attach_chat_conversation
 
 
 @pytest.fixture()
 def client():
     app = create_app()
     app.config["TESTING"] = True
-    return app.test_client()
+    return attach_chat_conversation(app.test_client())
 
 
 @pytest.fixture(autouse=True)
