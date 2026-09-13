@@ -1,5 +1,7 @@
 """Chroma 向量存储：单一 Collection，metadata 过滤，按 doc_id 清理。"""
 
+import threading
+
 from chromadb import PersistentClient
 from langchain_chroma import Chroma as LangChainChroma
 from langchain_core.documents import Document
@@ -10,21 +12,26 @@ COLLECTION_NAME = "enterprise_knowledge"
 
 _client = None
 _collection = None
+# 客户端与集合必须成对初始化：后台灌库线程与请求线程会并发触发懒加载，
+# 没有锁的话可能出现「客户端已建、集合还是 None」的半初始化状态
+_lock = threading.Lock()
 
 
 def reset() -> None:
     """释放缓存（测试隔离用）。"""
     global _client, _collection
-    _client = None
-    _collection = None
+    with _lock:
+        _client = None
+        _collection = None
 
 
 def get_collection():
     global _client, _collection
-    if _client is None:
-        _client = PersistentClient(path=Config.CHROMA_PERSIST_DIR)
-        _collection = _client.get_or_create_collection(name=COLLECTION_NAME)
-    return _collection
+    with _lock:
+        if _client is None or _collection is None:
+            _client = PersistentClient(path=Config.CHROMA_PERSIST_DIR)
+            _collection = _client.get_or_create_collection(name=COLLECTION_NAME)
+        return _collection
 
 
 def upsert_chunks(

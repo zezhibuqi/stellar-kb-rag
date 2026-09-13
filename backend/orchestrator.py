@@ -6,11 +6,14 @@
 """
 
 import logging
+import json
 from concurrent.futures import ThreadPoolExecutor, wait
 
+import agent_tools
 import chroma_store
 import llm
 import order_qa
+import rag
 from config import Config
 
 logger = logging.getLogger("orchestrator")
@@ -189,11 +192,17 @@ def _format_knowledge_evidence(items: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def collect_evidence(sub_questions: list[dict], search_tool, order_tool) -> dict:
+def new_evidence_state() -> dict:
+    """跨轮共享的证据预算：全局计数与已占用的证据单元。"""
+    return {"seen": set(), "total": 0}
+
+
+def collect_evidence(
+    sub_questions: list[dict], search_tool, order_tool, state: dict | None = None
+) -> dict:
     """按每子问题配额与全局上限裁决证据，跨子问题按证据单元去重。"""
+    state = state if state is not None else new_evidence_state()
     per_sub: dict[int, dict] = {}
-    seen: set = set()
-    total = 0
     per_limit = Config.AGENT_EVIDENCE_PER_SUB
     global_limit = Config.AGENT_EVIDENCE_GLOBAL
 
@@ -211,17 +220,17 @@ def collect_evidence(sub_questions: list[dict], search_tool, order_tool) -> dict
         result = search_tool(sub_question["query"])
         items: list[dict] = []
         for item in result.get("items") or []:
-            if len(items) >= per_limit or total >= global_limit:
+            if len(items) >= per_limit or state["total"] >= global_limit:
                 break
             key = chroma_store.evidence_unit_key(
                 item.get("doc_id"),
                 item.get("parent_start_line"),
                 item.get("parent_end_line"),
             )
-            if key in seen:
+            if key in state["seen"]:
                 continue
-            seen.add(key)
-            total += 1
+            state["seen"].add(key)
+            state["total"] += 1
             items.append(item)
         per_sub[sub_question["id"]] = {
             "kind": SOURCE_KNOWLEDGE,
@@ -276,13 +285,14 @@ def answer_sub_questions(
     search_tool,
     order_tool,
     history: list | None = None,
+    state: dict | None = None,
 ) -> list[dict]:
     """并行取得每个子问题的子答案；单个子问题失败不影响其他子问题。"""
     sub_questions = plan.get("sub_questions") or []
     if not sub_questions:
         return []
 
-    evidence_map = collect_evidence(sub_questions, search_tool, order_tool)
+    evidence_map = collect_evidence(sub_questions, search_tool, order_tool, state)
     results = [_base_result(sub_question) for sub_question in sub_questions]
 
     def run(index: int) -> dict:
@@ -393,3 +403,196 @@ def synthesize(
 ) -> str:
     """非流式合成；流式输出在接口层用同一份 prompt 走 llm.stream。"""
     return llm.invoke(build_synthesis_prompt(question, sub_results, history))
+
+
+# ── 有界第二轮与编排入口 ──────────────────────────────────────────────────
+
+
+def _event(payload: dict) -> str:
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def build_round_two_plan(
+    sub_results: list[dict], unresolved_ids: list[int], limit: int | None = None
+) -> dict:
+    """第二轮：用第一轮的关键实体构造检索式，补齐缺失证据（链式问题的第二跳）。
+
+    查询式取中间实体本身，取回该实体的规格证据，具体属性由合成步按原问题挑选。
+    """
+    sub_questions: list[dict] = []
+    offset = len(sub_results)
+    for item in sub_results:
+        if item["id"] not in unresolved_ids:
+            continue
+        for entity in item["key_entities"][:2]:
+            if limit is not None and len(sub_questions) >= limit:
+                return {"sub_questions": sub_questions}
+            sub_questions.append(
+                {
+                    "id": offset + len(sub_questions) + 1,
+                    "query": entity,
+                    "source": SOURCE_KNOWLEDGE,
+                    "filters": {},
+                    "aggregation": None,
+                    "follow_up_of": item["id"],
+                }
+            )
+    return {"sub_questions": sub_questions}
+
+
+def collect_sources(sub_results: list[dict]) -> list[dict]:
+    """按子问题分组来源：每条来源带 sub_question_id，供前端分区渲染。"""
+    sources: list[dict] = []
+    for item in sub_results:
+        for evidence in item["evidence"]:
+            sources.append(
+                {
+                    "source_type": "vector",
+                    "filename": evidence.get("filename", ""),
+                    "domain": evidence.get("domain", ""),
+                    "content_preview": (evidence.get("text") or "")[:200],
+                    "doc_id": evidence.get("doc_id"),
+                    "chunk_id": evidence.get("chunk_id"),
+                    "chunk_type": evidence.get("chunk_type"),
+                    "start_line": evidence.get("start_line"),
+                    "sub_question_id": item["id"],
+                }
+            )
+        order_result = item.get("order")
+        if order_result and order_result.get("status") == "ok":
+            source = order_qa.build_database_source(order_result)
+            source["sub_question_id"] = item["id"]
+            sources.append(source)
+    return sources
+
+
+def build_trace(
+    plan: dict,
+    sub_results: list[dict],
+    round_two_count: int = 0,
+    single_hop: bool = False,
+    fallback: bool = False,
+) -> dict:
+    return {
+        "single_hop": single_hop,
+        "fallback": fallback,
+        "truncated_sub_questions": plan.get("truncated", 0),
+        "rounds": 2 if round_two_count else 1,
+        "round_two_sub_questions": round_two_count,
+        "sub_questions": [
+            {
+                "id": item["id"],
+                "query": item["query"],
+                "source": item["source"],
+                "coverage": item["coverage"],
+                "error": item["error"],
+                "key_entities": item["key_entities"],
+                "evidence": [
+                    {
+                        "doc_id": evidence.get("doc_id"),
+                        "parent_start_line": evidence.get("parent_start_line"),
+                        "parent_end_line": evidence.get("parent_end_line"),
+                    }
+                    for evidence in item["evidence"]
+                ],
+            }
+            for item in sub_results
+        ],
+    }
+
+
+def run_enhanced(
+    question: str,
+    user_role: str,
+    history: list | None = None,
+    trace_out: dict | None = None,
+):
+    """编排入口：产出 JSON 事件字符串（stage / token / done）。
+
+    trace 通过 trace_out 回传——生成器无法 return 值，接口层传入一个字典，
+    消费完事件流后即可拿到过程记录并随消息落库。
+    """
+    search_tool = agent_tools.build_knowledge_search(user_role)
+    order_tool = agent_tools.build_order_query(user_role)
+
+    yield _event({"stage": "planning"})
+    plan = plan_question(question, history)
+
+    if plan["fallback"]:
+        # 规划失败：退回标准模式单跳，并显式告诉用户（故障不静默）
+        if trace_out is not None:
+            trace_out.update(build_trace(plan, [], single_hop=True, fallback=True))
+        yield _event({"token": PLANNER_FALLBACK_PREFIX})
+        for event in rag.answer_question(
+            question, history=history, user_role=user_role, stream=True
+        ):
+            yield event
+        return
+
+    if not plan["needs_decomposition"]:
+        # 单跳短路：界面不做任何提示，只在 trace 里留痕
+        if trace_out is not None:
+            trace_out.update(build_trace(plan, [], single_hop=True))
+        for event in rag.answer_question(
+            question, history=history, user_role=user_role, stream=True
+        ):
+            yield event
+        return
+
+    sub_questions = plan["sub_questions"]
+    yield _event(
+        {
+            "stage": "planned",
+            "sub_questions": [
+                {"id": item["id"], "text": item["query"]} for item in sub_questions
+            ],
+        }
+    )
+
+    state = new_evidence_state()
+    results = answer_sub_questions(
+        plan, question, search_tool, order_tool, history, state
+    )
+    for item in results:
+        yield _event(
+            {
+                "stage": "sub_answer",
+                "sub_question_id": item["id"],
+                "answer": item["answer"],
+                "coverage": item["coverage"],
+            }
+        )
+
+    round_two_count = 0
+    unresolved = unresolved_sub_questions(results)
+    if unresolved:
+        round_two_plan = build_round_two_plan(
+            results, unresolved, limit=Config.AGENT_MAX_SUB_QUESTIONS
+        )
+        if round_two_plan["sub_questions"]:
+            round_two_count = len(round_two_plan["sub_questions"])
+            extra_results = answer_sub_questions(
+                round_two_plan, question, search_tool, order_tool, history, state
+            )
+            results.extend(extra_results)
+            for item in extra_results:
+                yield _event(
+                    {
+                        "stage": "sub_answer",
+                        "sub_question_id": item["id"],
+                        "answer": item["answer"],
+                        "coverage": item["coverage"],
+                        "follow_up": True,
+                    }
+                )
+
+    if trace_out is not None:
+        trace_out.update(
+            build_trace(plan, results, round_two_count=round_two_count)
+        )
+
+    yield _event({"stage": "synthesizing"})
+    prompt = build_synthesis_prompt(question, results, history)
+    for token in llm.stream(prompt):
+        yield _event({"token": token})
+    yield _event({"done": True, "sources": collect_sources(results)})
