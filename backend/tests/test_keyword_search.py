@@ -49,7 +49,18 @@ def test_short_term_falls_back_to_like():
 def test_query_absent_from_corpus_returns_none():
     """语料里确实没有的词返回 none——降级不等于硬凑命中。"""
     _seed()
-    assert keyword_index.search("燃料电池")["mode"] == "none"
+    assert keyword_index.search("量子")["mode"] == "none"
+
+
+def test_long_chinese_phrase_falls_back_to_short_terms():
+    """长片段在语料里不存在时，用它的 2 字头/尾词走 LIKE 兜底。
+
+    「年报释义」不在文档里（文档写的是「释义项」），但「释义」在。
+    """
+    doc_id = _seed()
+    result = keyword_index.search("年报释义 正式全称")
+    assert result["mode"] == "like"
+    assert result["rows"][0]["doc_id"] == doc_id
 
 
 def test_domain_filter_applies_to_both_paths():

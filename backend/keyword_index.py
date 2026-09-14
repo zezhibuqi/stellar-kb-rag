@@ -134,20 +134,31 @@ def search(
             if rows:
                 return {"rows": rows, "mode": "match"}
 
-    # LIKE 降级：短词、或 MATCH 整条零命中
-    like_terms = [term for term in terms if len(term) < _MIN_MATCH_LEN] or terms
-    like_limit = Config.AGENT_LIKE_TOP_K
-    clause = " AND ".join(f"content LIKE ? ESCAPE '\\'" for _ in like_terms[:5])
-    params = [f"%{_escape_like(term)}%" for term in like_terms[:5]]
-    where = _domain_clause(domains, params)
-    rows = _rows(
-        conn.execute(
-            f"SELECT {', '.join(_COLUMNS)}, content FROM chunk_index "
-            f"WHERE {clause}{where} LIMIT ?",
-            params + [like_limit],
+    # LIKE 降级：短词、或 MATCH 整条零命中。
+    # 长中文片段额外吐出 2 字头/尾词——整段在语料里可能根本不存在
+    # （例：「年报释义」不存在，但文档里写的是「释义项」）。
+    short_terms = [term for term in terms if len(term) < _MIN_MATCH_LEN]
+    if not short_terms:
+        for term in terms:
+            if len(term) > _MIN_MATCH_LEN and re.match(r"^[\u4e00-\u9fff]+$", term):
+                short_terms.extend([term[:2], term[-2:]])
+    like_terms = list(dict.fromkeys(short_terms or terms))[:5]
+
+    # 先 AND 精确匹配；无果再 OR 放宽（兜底以召回为先，配额与重排控制精度）
+    for join in (" AND ", " OR "):
+        clause = join.join("content LIKE ? ESCAPE '\\'" for _ in like_terms)
+        params = [f"%{_escape_like(term)}%" for term in like_terms]
+        where = _domain_clause(domains, params)
+        rows = _rows(
+            conn.execute(
+                f"SELECT {', '.join(_COLUMNS)}, content FROM chunk_index "
+                f"WHERE {clause}{where} LIMIT ?",
+                params + [Config.AGENT_LIKE_TOP_K],
+            )
         )
-    )
-    return {"rows": rows, "mode": "like" if rows else "none"}
+        if rows:
+            return {"rows": rows, "mode": "like"}
+    return {"rows": [], "mode": "none"}
 
 
 def index_document(doc_id: int) -> int:
