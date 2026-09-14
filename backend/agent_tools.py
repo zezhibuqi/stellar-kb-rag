@@ -37,8 +37,9 @@ def build_knowledge_search(
         hits = chroma_store.similarity_search(
             query, k=k, where={"domain": {"$in": allowed_domains}}
         )
-        # 先多取一些再按证据单元去重，避免同一张表的多个分段占满候选位
-        ranked = rerank_top_n(hits, query, top_n=max(limit * 3, limit))
+        # 先多取一些再按证据单元去重，避免同一张表的多个分段占满候选位；
+        # 重排保留数单独配置，太窄会把"召回到了但名次靠后"的块挤掉
+        ranked = rerank_top_n(hits, query, top_n=Config.AGENT_RERANK_TOP_N)
 
         items: list[dict] = []
         seen: set = set()

@@ -64,9 +64,12 @@ class Config:
 
     # 增强模式（编排式问答）
     AGENT_MAX_SUB_QUESTIONS = int(os.getenv("AGENT_MAX_SUB_QUESTIONS", "8"))
-    AGENT_EVIDENCE_PER_SUB = int(os.getenv("AGENT_EVIDENCE_PER_SUB", "2"))
+    AGENT_EVIDENCE_PER_SUB = int(os.getenv("AGENT_EVIDENCE_PER_SUB", "3"))
     AGENT_EVIDENCE_GLOBAL = int(os.getenv("AGENT_EVIDENCE_GLOBAL", "10"))
-    AGENT_SEARCH_CANDIDATES = int(os.getenv("AGENT_SEARCH_CANDIDATES", "3"))
+    AGENT_SEARCH_CANDIDATES = int(os.getenv("AGENT_SEARCH_CANDIDATES", "5"))
+    # 重排后保留的候选数：实测目标块可能排在密集召回的 8~10 名，
+    # 留太窄会在重排阶段被挤掉（它是候选生成之后、注入之前的最后一道闸）
+    AGENT_RERANK_TOP_N = int(os.getenv("AGENT_RERANK_TOP_N", "12"))
     # 增强模式的向量召回条数：比标准模式大，缓解超大文档（如 600KB 年报
     # 切出 500+ 块）里具体句子挤不进候选集的问题；重排仍只取少量候选。
     AGENT_RETRIEVE_K = int(os.getenv("AGENT_RETRIEVE_K", "30"))
