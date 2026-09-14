@@ -7,6 +7,7 @@
 
 import logging
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor, wait
 
 import agent_tools
@@ -251,8 +252,14 @@ def collect_evidence(
         # 第二轮的子问题可能带备用查询（通常是用户原问题）：规划器写占位查询时
         # 还不知道实体，措辞容易偏离原文，两个查询交替取用可兼顾精确与召回。
         queries = [sub_question["query"]]
-        if sub_question.get("alt_query"):
-            queries.append(sub_question["alt_query"])
+        for extra in (
+            sub_question.get("alt_query"),
+            sub_question.get("stripped_query"),
+        ):
+            if extra and _normalize_query(extra) not in {
+                _normalize_query(item) for item in queries
+            }:
+                queries.append(extra)
 
         first_result: dict = {"status": agent_tools.STATUS_EMPTY, "items": []}
         pools: list[list[dict]] = []
@@ -471,6 +478,16 @@ def _fill_placeholder(query: str, dependency_id, entity: str) -> str:
     return f"{entity} {query}"
 
 
+def _strip_placeholders(query: str) -> str:
+    """去掉占位符，只保留意图词。
+
+    规划器写占位查询时还不知道实体，替换后可能把实体变成噪声——例如
+    「{1} 年报释义 正式全称」替换成「SC-300 年报释义 正式全称」，而年报的
+    释义表里根本没有「SC-300」这个词。留一个不带实体的变体作为第三种查询。
+    """
+    return " ".join(re.sub(r"\{\s*\d+\s*\}", " ", query or "").split())
+
+
 def _normalize_query(query: str) -> str:
     return " ".join((query or "").split()).lower()
 
@@ -546,6 +563,7 @@ def build_round_two_plan(
                 item.get("depends_on"),
                 alt_query=question,
             )
+            sub_questions[-1]["stripped_query"] = _strip_placeholders(item["query"])
 
     for item in sub_results:
         if item["id"] not in unresolved_ids:
@@ -639,7 +657,9 @@ def run_enhanced(
     trace 通过 trace_out 回传——生成器无法 return 值，接口层传入一个字典，
     消费完事件流后即可拿到过程记录并随消息落库。
     """
-    search_tool = agent_tools.build_knowledge_search(user_role)
+    search_tool = agent_tools.build_knowledge_search(
+        user_role, k=Config.AGENT_RETRIEVE_K
+    )
     order_tool = agent_tools.build_order_query(user_role)
 
     yield _event({"stage": "planning"})

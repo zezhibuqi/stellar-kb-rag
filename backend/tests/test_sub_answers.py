@@ -217,6 +217,37 @@ def test_round_two_marks_alt_query_for_gap_fill():
     assert plan["sub_questions"][0]["alt_query"] == "原问题"
 
 
+def test_round_two_adds_stripped_query_variant():
+    plan = orchestrator.build_round_two_plan(
+        [_round_one_result(["SC-300"])],
+        [],
+        pending=_pending(),
+        limit=8,
+        question="原问题",
+    )
+    assert plan["sub_questions"][0]["stripped_query"] == "单体质量能量密度 25℃ 循环寿命"
+
+
+def test_collect_evidence_searches_all_query_variants():
+    searched: list[str] = []
+
+    def search(query):
+        searched.append(query)
+        index = len(searched)
+        return {
+            "status": "ok",
+            "items": [_knowledge_item(index, index * 10, index * 10 + 2)],
+        }
+
+    sub_question = _sub(1, "实体式查询")
+    sub_question["alt_query"] = "原问题"
+    sub_question["stripped_query"] = "意图词"
+    evidence = orchestrator.collect_evidence([sub_question], search, lambda *a: {})
+
+    assert searched == ["实体式查询", "原问题", "意图词"]
+    assert len(evidence[1]["items"]) == Config.AGENT_EVIDENCE_PER_SUB
+
+
 def test_collect_evidence_merges_alt_query_without_duplicates():
     primary = _knowledge_item(1, 10, 20, "a.md")
     alternative = _knowledge_item(2, 30, 40, "b.md")

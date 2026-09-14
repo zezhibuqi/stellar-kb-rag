@@ -67,6 +67,9 @@ class Config:
     AGENT_EVIDENCE_PER_SUB = int(os.getenv("AGENT_EVIDENCE_PER_SUB", "2"))
     AGENT_EVIDENCE_GLOBAL = int(os.getenv("AGENT_EVIDENCE_GLOBAL", "10"))
     AGENT_SEARCH_CANDIDATES = int(os.getenv("AGENT_SEARCH_CANDIDATES", "3"))
+    # 增强模式的向量召回条数：比标准模式大，缓解超大文档（如 600KB 年报
+    # 切出 500+ 块）里具体句子挤不进候选集的问题；重排仍只取少量候选。
+    AGENT_RETRIEVE_K = int(os.getenv("AGENT_RETRIEVE_K", "30"))
     AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))
     AGENT_TOTAL_BUDGET = int(os.getenv("AGENT_TOTAL_BUDGET", "120"))
     # 调用 token 预算：思考型模型会先花掉大量预算再输出 JSON。
