@@ -248,24 +248,45 @@ def collect_evidence(
             }
             continue
 
-        result = search_tool(sub_question["query"])
+        # 第二轮的子问题可能带备用查询（通常是用户原问题）：规划器写占位查询时
+        # 还不知道实体，措辞容易偏离原文，两个查询交替取用可兼顾精确与召回。
+        queries = [sub_question["query"]]
+        if sub_question.get("alt_query"):
+            queries.append(sub_question["alt_query"])
+
+        first_result: dict = {"status": agent_tools.STATUS_EMPTY, "items": []}
+        pools: list[list[dict]] = []
+        for position, query in enumerate(queries):
+            result = search_tool(query)
+            if position == 0:
+                first_result = result
+            pools.append(list(result.get("items") or []))
+
         items: list[dict] = []
-        for item in result.get("items") or []:
-            if len(items) >= per_limit or state["total"] >= global_limit:
+        while len(items) < per_limit and any(pools):
+            progressed = False
+            for pool in pools:
+                if len(items) >= per_limit or state["total"] >= global_limit:
+                    break
+                while pool:
+                    candidate = pool.pop(0)
+                    key = chroma_store.evidence_unit_key(
+                        candidate.get("doc_id"),
+                        candidate.get("parent_start_line"),
+                        candidate.get("parent_end_line"),
+                    )
+                    if key in state["seen"]:
+                        continue
+                    state["seen"].add(key)
+                    state["total"] += 1
+                    items.append(candidate)
+                    progressed = True
+                    break
+            if not progressed:
                 break
-            key = chroma_store.evidence_unit_key(
-                item.get("doc_id"),
-                item.get("parent_start_line"),
-                item.get("parent_end_line"),
-            )
-            if key in state["seen"]:
-                continue
-            state["seen"].add(key)
-            state["total"] += 1
-            items.append(item)
         per_sub[sub_question["id"]] = {
             "kind": SOURCE_KNOWLEDGE,
-            "result": result,
+            "result": first_result,
             "items": items,
         }
 
@@ -472,6 +493,7 @@ def build_round_two_plan(
     unresolved_ids: list[int],
     pending: list[dict] | None = None,
     limit: int | None = None,
+    question: str | None = None,
 ) -> dict:
     """第二轮计划，由两部分组成：
 
@@ -479,16 +501,18 @@ def build_round_two_plan(
        中间实体填实占位符后执行——这正是链式问题的第二跳。
     2. **缺口补充**：对覆盖为部分/缺失的子问题，直接用其关键实体再查一轮。
 
-    待定项若无法展开（依赖无结果或没有中间实体），会在 unresolved_pending 里返回，
-    由调用方作为「证据缺失」写入结果，避免静默漏项。
+    待定项若无法展开（依赖无结果或没有中间实体），优先回退用**用户原问题**检索一次
+    （原问题的措辞通常比规划器事先写好的占位查询更贴原文）；连原问题都没有时，
+    才在 unresolved_pending 里返回，由调用方作为「证据缺失」写入结果，避免静默漏项。
     """
     sub_questions: list[dict] = []
     unresolved_pending: list[dict] = []
     added_queries: list[str] = []
     offset = len(sub_results)
     results_by_id = {item["id"]: item for item in sub_results}
+    fallback_used = False
 
-    def add(query: str, follow_up_of) -> None:
+    def add(query: str, follow_up_of, alt_query: str | None = None) -> None:
         added_queries.append(_normalize_query(query))
         sub_questions.append(
             {
@@ -498,6 +522,7 @@ def build_round_two_plan(
                 "filters": {},
                 "aggregation": None,
                 "follow_up_of": follow_up_of,
+                "alt_query": alt_query,
             }
         )
 
@@ -505,13 +530,22 @@ def build_round_two_plan(
         dependency = results_by_id.get(item.get("depends_on"))
         entities = dependency["key_entities"] if dependency else []
         if not entities:
-            unresolved_pending.append(item)
+            # 拿不到中间实体：退回用原问题检索一次（整问的措辞往往能命中）
+            if question and not fallback_used and not _is_redundant(question, added_queries):
+                fallback_used = True
+                add(question, item.get("depends_on"))
+            else:
+                unresolved_pending.append(item)
             continue
         for entity in entities[:2]:
             if limit is not None and len(sub_questions) >= limit:
                 unresolved_pending.append(item)
                 break
-            add(_fill_placeholder(item["query"], item.get("depends_on"), entity), item.get("depends_on"))
+            add(
+                _fill_placeholder(item["query"], item.get("depends_on"), entity),
+                item.get("depends_on"),
+                alt_query=question,
+            )
 
     for item in sub_results:
         if item["id"] not in unresolved_ids:
@@ -524,7 +558,7 @@ def build_round_two_plan(
                 }
             if _is_redundant(entity, added_queries):
                 continue
-            add(entity, item["id"])
+            add(entity, item["id"], alt_query=question)
 
     return {
         "sub_questions": sub_questions,
@@ -678,11 +712,22 @@ def run_enhanced(
         unresolved,
         pending=pending,
         limit=Config.AGENT_MAX_SUB_QUESTIONS,
+        question=question,
     )
-    # 待定项没能展开（依赖无结果或没有中间实体）时按证据缺失写入结果，
-    # 让合成阶段显式说明该部分没有依据
+    # 连原问题回退都没能展开的待定项：按证据缺失写入结果，并发事件告知前端，
+    # 避免出现「无声消失的子问题」
     for item in round_two_plan["unresolved_pending"]:
         results.append(_base_result(item))
+        yield _event(
+            {
+                "stage": "sub_answer",
+                "sub_question_id": item["id"],
+                "answer": "",
+                "coverage": COVERAGE_MISSING,
+                "error": "依赖未满足，未执行检索",
+                "follow_up": True,
+            }
+        )
     if round_two_plan["sub_questions"]:
         round_two_count = len(round_two_plan["sub_questions"])
         extra_results = answer_sub_questions(

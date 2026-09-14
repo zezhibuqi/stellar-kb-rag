@@ -197,6 +197,41 @@ def test_round_two_reports_pending_without_entities():
     assert plan["unresolved_pending"] == pending
 
 
+def test_round_two_falls_back_to_original_question():
+    """拿不到中间实体时，用用户原问题检索一次，而不是直接判缺失。"""
+    plan = orchestrator.build_round_two_plan(
+        [_round_one_result([])],
+        [],
+        pending=_pending(),
+        limit=8,
+        question="财务总监在年报里是以什么身份作出声明的？",
+    )
+    assert plan["unresolved_pending"] == []
+    assert plan["sub_questions"][0]["query"] == "财务总监在年报里是以什么身份作出声明的？"
+
+
+def test_round_two_marks_alt_query_for_gap_fill():
+    plan = orchestrator.build_round_two_plan(
+        [_round_one_result(["SC-300"])], [1], limit=8, question="原问题"
+    )
+    assert plan["sub_questions"][0]["alt_query"] == "原问题"
+
+
+def test_collect_evidence_merges_alt_query_without_duplicates():
+    primary = _knowledge_item(1, 10, 20, "a.md")
+    alternative = _knowledge_item(2, 30, 40, "b.md")
+
+    def search(query):
+        return {"status": "ok", "items": [alternative if query == "原问题" else primary]}
+
+    sub_question = _sub(1, "实体式查询")
+    sub_question["alt_query"] = "原问题"
+    evidence = orchestrator.collect_evidence([sub_question], search, lambda *a: {})
+    docs = [item["doc_id"] for item in evidence[1]["items"]]
+    assert sorted(docs) == [1, 2], "两个查询的命中应合并"
+    assert len(docs) == len(set(docs)), "合并后不得重复"
+
+
 def test_round_two_skips_entity_query_already_covered_by_pending():
     """链式第二跳已经用该实体查过时，缺口补充不再用同一个实体重复检索。"""
     result = _round_one_result(["SC-300"])
