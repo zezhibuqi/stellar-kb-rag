@@ -225,18 +225,71 @@ def _format_knowledge_evidence(items: list[dict]) -> str:
 
 
 def new_evidence_state() -> dict:
-    """跨轮共享的证据预算：全局计数与已占用的证据单元。"""
-    return {"seen": set(), "total": 0}
+    """跨轮共享的状态：去重集合全局唯一，计数按预算池分开（ADR 0010）。"""
+    return {"seen": set(), "round1": 0, "chain": 0, "gap": 0}
+
+
+# 证据预算池：第一轮、链式延伸、缺口补充各自独立计数，互不借用
+POOL_ROUND_ONE = "round1"
+POOL_CHAIN = "chain"
+POOL_GAP = "gap"
+
+
+def _pool_limit(pool: str) -> int:
+    if pool == POOL_CHAIN:
+        return Config.AGENT_CHAIN_EVIDENCE_BUDGET
+    if pool == POOL_GAP:
+        return Config.AGENT_GAP_EVIDENCE_BUDGET
+    return Config.AGENT_EVIDENCE_GLOBAL
+
+
+def _interleave(
+    pools: list[list[dict]], per_limit: int, state: dict, pool: str
+) -> list[dict]:
+    """按查询变体轮转取用，受每子问题配额与本池额度双重约束。"""
+    items: list[dict] = []
+    limit = _pool_limit(pool)
+    while len(items) < per_limit and state[pool] < limit and any(pools):
+        progressed = False
+        for candidates in pools:
+            if len(items) >= per_limit or state[pool] >= limit:
+                break
+            while candidates:
+                candidate = candidates.pop(0)
+                key = chroma_store.evidence_unit_key(
+                    candidate.get("doc_id"),
+                    candidate.get("parent_start_line"),
+                    candidate.get("parent_end_line"),
+                )
+                if key in state["seen"]:
+                    continue
+                state["seen"].add(key)
+                state[pool] += 1
+                items.append(candidate)
+                progressed = True
+                break
+        if not progressed:
+            break
+    return items
 
 
 def collect_evidence(
     sub_questions: list[dict], search_tool, order_tool, state: dict | None = None
 ) -> dict:
-    """按每子问题配额与全局上限裁决证据，跨子问题按证据单元去重。"""
+    """按每子问题配额与池额度裁决证据，跨子问题按证据单元去重。
+
+    额度按「剩余额度 / 剩余子问题数」公平分配，而不是让前面的子问题先吃满自己的
+    配额——否则池额度偏紧时，排在后面的子问题（往往正是链式义务）一条也拿不到。
+    """
     state = state if state is not None else new_evidence_state()
     per_sub: dict[int, dict] = {}
     per_limit = Config.AGENT_EVIDENCE_PER_SUB
     global_limit = Config.AGENT_EVIDENCE_GLOBAL
+
+    knowledge_count = sum(
+        1 for item in sub_questions if item["source"] != SOURCE_ORDER
+    )
+    processed_knowledge = 0
 
     for sub_question in sub_questions:
         if sub_question["source"] == SOURCE_ORDER:
@@ -246,55 +299,49 @@ def collect_evidence(
                     sub_question.get("filters") or {}, sub_question.get("aggregation")
                 ),
                 "items": [],
+                "variants": [],
+                "pool": sub_question.get("pool", POOL_ROUND_ONE),
             }
             continue
 
         # 第二轮的子问题可能带备用查询（通常是用户原问题）：规划器写占位查询时
         # 还不知道实体，措辞容易偏离原文，两个查询交替取用可兼顾精确与召回。
-        queries = [sub_question["query"]]
+        queries = [("primary", sub_question["query"])]
         for extra in (
             sub_question.get("alt_query"),
             sub_question.get("stripped_query"),
         ):
             if extra and _normalize_query(extra) not in {
-                _normalize_query(item) for item in queries
+                _normalize_query(item[1]) for item in queries
             }:
-                queries.append(extra)
+                queries.append(("alt_question" if extra == sub_question.get("alt_query") else "intent_terms", extra))
 
         first_result: dict = {"status": agent_tools.STATUS_EMPTY, "items": []}
         pools: list[list[dict]] = []
-        for position, query in enumerate(queries):
+        variant_metrics: list[dict] = []
+        for position, (kind, query) in enumerate(queries):
             result = search_tool(query)
             if position == 0:
                 first_result = result
             pools.append(list(result.get("items") or []))
+            variant_metrics.append(
+                {"kind": kind, "query": query, **(result.get("retrieval") or {})}
+            )
 
-        items: list[dict] = []
-        while len(items) < per_limit and any(pools):
-            progressed = False
-            for pool in pools:
-                if len(items) >= per_limit or state["total"] >= global_limit:
-                    break
-                while pool:
-                    candidate = pool.pop(0)
-                    key = chroma_store.evidence_unit_key(
-                        candidate.get("doc_id"),
-                        candidate.get("parent_start_line"),
-                        candidate.get("parent_end_line"),
-                    )
-                    if key in state["seen"]:
-                        continue
-                    state["seen"].add(key)
-                    state["total"] += 1
-                    items.append(candidate)
-                    progressed = True
-                    break
-            if not progressed:
-                break
+        pool = sub_question.get("pool", POOL_ROUND_ONE)
+        processed_knowledge += 1
+        remaining_items = max(1, knowledge_count - processed_knowledge + 1)
+        budget_left = max(0, _pool_limit(pool) - state[pool])
+        allowance = max(
+            1, min(per_limit, -(-budget_left // remaining_items))
+        )
+        items = _interleave(pools, allowance, state, pool)
         per_sub[sub_question["id"]] = {
             "kind": SOURCE_KNOWLEDGE,
             "result": first_result,
             "items": items,
+            "variants": variant_metrics,
+            "pool": pool,
         }
 
     return per_sub
@@ -305,11 +352,13 @@ def _base_result(sub_question: dict) -> dict:
         "id": sub_question["id"],
         "query": sub_question["query"],
         "source": sub_question["source"],
+        "pool": sub_question.get("pool", POOL_ROUND_ONE),
         "answer": "",
         "coverage": COVERAGE_MISSING,
         "evidence_ids": [],
         "key_entities": [],
         "evidence": [],
+        "retrieval": [],
         "order": None,
         "error": None,
     }
@@ -359,6 +408,7 @@ def answer_sub_questions(
         evidence = evidence_map[sub_question["id"]]
         result = _base_result(sub_question)
         result["evidence"] = evidence["items"]
+        result["retrieval"] = evidence.get("variants") or []
         if evidence["kind"] == SOURCE_ORDER:
             order_result = evidence["result"]
             result["order"] = order_result
@@ -529,7 +579,12 @@ def build_round_two_plan(
     results_by_id = {item["id"]: item for item in sub_results}
     fallback_used = False
 
-    def add(query: str, follow_up_of, alt_query: str | None = None) -> None:
+    def add(
+        query: str,
+        follow_up_of,
+        alt_query: str | None = None,
+        pool: str = POOL_GAP,
+    ) -> None:
         added_queries.append(_normalize_query(query))
         sub_questions.append(
             {
@@ -540,6 +595,7 @@ def build_round_two_plan(
                 "aggregation": None,
                 "follow_up_of": follow_up_of,
                 "alt_query": alt_query,
+                "pool": pool,
             }
         )
 
@@ -555,7 +611,12 @@ def build_round_two_plan(
                 fallback_query, added_queries
             ):
                 fallback_used = True
-                add(fallback_query, item.get("depends_on"), alt_query=question)
+                add(
+                    fallback_query,
+                    item.get("depends_on"),
+                    alt_query=question,
+                    pool=POOL_CHAIN,
+                )
             else:
                 unresolved_pending.append(item)
             continue
@@ -567,6 +628,7 @@ def build_round_two_plan(
                 _fill_placeholder(item["query"], item.get("depends_on"), entity),
                 item.get("depends_on"),
                 alt_query=question,
+                pool=POOL_CHAIN,
             )
             sub_questions[-1]["stripped_query"] = _strip_placeholders(item["query"])
 
@@ -621,6 +683,7 @@ def build_trace(
     round_two_count: int = 0,
     single_hop: bool = False,
     fallback: bool = False,
+    budgets: dict | None = None,
 ) -> dict:
     return {
         "single_hop": single_hop,
@@ -628,15 +691,18 @@ def build_trace(
         "truncated_sub_questions": plan.get("truncated", 0),
         "rounds": 2 if round_two_count else 1,
         "round_two_sub_questions": round_two_count,
+        "budgets": budgets or {},
         "sub_questions": [
             {
                 "id": item["id"],
                 "query": item["query"],
                 "source": item["source"],
+                "pool": item.get("pool"),
                 "answer": item["answer"],
                 "coverage": item["coverage"],
                 "error": item["error"],
                 "key_entities": item["key_entities"],
+                "retrieval": item.get("retrieval") or [],
                 "evidence": [
                     {
                         "doc_id": evidence.get("doc_id"),
@@ -756,9 +822,27 @@ def run_enhanced(
         )
     if round_two_plan["sub_questions"]:
         round_two_count = len(round_two_plan["sub_questions"])
-        extra_results = answer_sub_questions(
-            round_two_plan, question, search_tool, order_tool, history, state
-        )
+        extra_results: list[dict] = []
+        # 链式池先跑：链式延伸是规划阶段就确定的义务，不该被机会主义的补查抢占；
+        # 两个池额度独立、不互相借用（ADR 0010）
+        for batch_pool in (POOL_CHAIN, POOL_GAP):
+            batch = [
+                item
+                for item in round_two_plan["sub_questions"]
+                if item.get("pool") == batch_pool
+            ]
+            if not batch:
+                continue
+            extra_results.extend(
+                answer_sub_questions(
+                    {"sub_questions": batch},
+                    question,
+                    search_tool,
+                    order_tool,
+                    history,
+                    state,
+                )
+            )
         results.extend(extra_results)
         for item in extra_results:
             yield _event(
@@ -774,7 +858,19 @@ def run_enhanced(
 
     if trace_out is not None:
         trace_out.update(
-            build_trace(plan, results, round_two_count=round_two_count)
+            build_trace(
+                plan,
+                results,
+                round_two_count=round_two_count,
+                budgets={
+                    "round1": state["round1"],
+                    "chain": state["chain"],
+                    "gap": state["gap"],
+                    "round1_limit": Config.AGENT_EVIDENCE_GLOBAL,
+                    "chain_limit": Config.AGENT_CHAIN_EVIDENCE_BUDGET,
+                    "gap_limit": Config.AGENT_GAP_EVIDENCE_BUDGET,
+                },
+            )
         )
 
     yield _event({"stage": "synthesizing"})

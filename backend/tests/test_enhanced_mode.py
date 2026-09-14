@@ -266,11 +266,13 @@ def test_chain_triggers_round_two_even_when_round_one_succeeds(monkeypatch, clie
                 "id": item["id"],
                 "query": item["query"],
                 "source": item["source"],
+                "pool": item.get("pool"),
                 "answer": "SC-300",
                 "coverage": "sufficient",
                 "evidence_ids": [],
                 "key_entities": ["SC-300"],
                 "evidence": [],
+                "retrieval": [],
                 "order": None,
                 "error": None,
             }
@@ -304,3 +306,5 @@ def test_chain_triggers_round_two_even_when_round_one_succeeds(monkeypatch, clie
         trace["sub_questions"][1]["query"]
         == "SC-300 单体质量能量密度 25℃ 循环寿命"
     )
+    assert trace["budgets"]["chain_limit"] > 0
+    assert trace["sub_questions"][1]["pool"] == "chain"

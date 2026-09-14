@@ -79,6 +79,11 @@ class Config:
     AGENT_LIKE_TOP_K = int(os.getenv("AGENT_LIKE_TOP_K", "20"))
     # RRF 融合常数：只用两路的名次，不比较各自的分值
     AGENT_RRF_K = int(os.getenv("AGENT_RRF_K", "60"))
+    # 第二轮的两个独立预算池（ADR 0010）：链式义务不该被机会主义的补查抢占
+    AGENT_CHAIN_EVIDENCE_BUDGET = int(
+        os.getenv("AGENT_CHAIN_EVIDENCE_BUDGET", "6")
+    )
+    AGENT_GAP_EVIDENCE_BUDGET = int(os.getenv("AGENT_GAP_EVIDENCE_BUDGET", "4"))
     AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))
     AGENT_TOTAL_BUDGET = int(os.getenv("AGENT_TOTAL_BUDGET", "120"))
     # 调用 token 预算：思考型模型会先花掉大量预算再输出 JSON。

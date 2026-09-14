@@ -286,3 +286,39 @@ def test_round_two_keeps_distinct_entity_queries():
     result = _round_one_result(["SC-300", "SC-400"])
     plan = orchestrator.build_round_two_plan([result], [1], pending=None, limit=8)
     assert [item["query"] for item in plan["sub_questions"]] == ["SC-300", "SC-400"]
+
+
+def test_round_two_marks_chain_and_gap_pools():
+    """链式延伸进链式池，缺口补充进缺口池——两者额度独立。"""
+    dependency = _round_one_result(["SC-300"])  # id=1，供链式待定项使用
+    unresolved = _round_one_result(["SC-400"])  # id=2，覆盖不足 → 缺口补查
+    unresolved["id"] = 2
+    unresolved["coverage"] = "partial"
+    plan = orchestrator.build_round_two_plan(
+        [dependency, unresolved], [2], pending=_pending(), limit=8, question="原问题"
+    )
+    pools = [item["pool"] for item in plan["sub_questions"]]
+    assert pools == ["chain", "gap"]
+
+
+def test_pools_do_not_compete_for_budget(monkeypatch):
+    """缺口池用尽后，链式池仍能拿到自己的额度。"""
+    monkeypatch.setattr(Config, "AGENT_CHAIN_EVIDENCE_BUDGET", 2)
+    monkeypatch.setattr(Config, "AGENT_GAP_EVIDENCE_BUDGET", 1)
+    monkeypatch.setattr(Config, "AGENT_EVIDENCE_PER_SUB", 3)
+    items = [_knowledge_item(index, index * 10, index * 10 + 2) for index in range(1, 7)]
+    search = _search(items)
+
+    gaps = [_sub(index, f"gap{index}", source="knowledge") for index in range(1, 3)]
+    for item in gaps:
+        item["pool"] = orchestrator.POOL_GAP
+    chains = [_sub(9, "chain", source="knowledge")]
+    chains[0]["pool"] = orchestrator.POOL_CHAIN
+
+    state = orchestrator.new_evidence_state()
+    per_sub = orchestrator.collect_evidence(gaps + chains, search, lambda *a: {}, state)
+
+    gap_total = sum(len(per_sub[item["id"]]["items"]) for item in gaps)
+    assert gap_total == 1, "缺口池只应拿 1 条"
+    assert len(per_sub[9]["items"]) == 2, "链式池不受缺口池影响"
+    assert state["chain"] == 2 and state["gap"] == 1
