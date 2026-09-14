@@ -134,6 +134,9 @@ export default function SettingsPage() {
                         {provider.name}
                       </Typography.Text>
                       {provider.active && <Tag color="blue">当前使用</Tag>}
+                      <Tag color={provider.agent_capable ? "purple" : "default"}>
+                        {provider.agent_capable ? "支持增强模式" : "仅标准模式"}
+                      </Tag>
                     </Space>
                     {provider.active && (
                       <CheckCircleOutlined

@@ -610,6 +610,7 @@ def build_trace(
                 "id": item["id"],
                 "query": item["query"],
                 "source": item["source"],
+                "answer": item["answer"],
                 "coverage": item["coverage"],
                 "error": item["error"],
                 "key_entities": item["key_entities"],
