@@ -73,6 +73,10 @@ class Config:
     # 增强模式的向量召回条数：比标准模式大，缓解超大文档（如 600KB 年报
     # 切出 500+ 块）里具体句子挤不进候选集的问题；重排仍只取少量候选。
     AGENT_RETRIEVE_K = int(os.getenv("AGENT_RETRIEVE_K", "30"))
+    # 关键词通道（ADR 0010）：两路各自召回后按 RRF 融合
+    AGENT_KEYWORD_TOP_K = int(os.getenv("AGENT_KEYWORD_TOP_K", "80"))
+    AGENT_FUSION_TOP_N = int(os.getenv("AGENT_FUSION_TOP_N", "30"))
+    AGENT_LIKE_TOP_K = int(os.getenv("AGENT_LIKE_TOP_K", "20"))
     AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))
     AGENT_TOTAL_BUDGET = int(os.getenv("AGENT_TOTAL_BUDGET", "120"))
     # 调用 token 预算：思考型模型会先花掉大量预算再输出 JSON。
