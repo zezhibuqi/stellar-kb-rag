@@ -85,8 +85,10 @@ def _rows(cursor) -> list[dict]:
     ]
 
 
-def _match_terms(conn, terms: list[str], domains, per_term: int) -> list[list[dict]]:
-    pools: list[list[dict]] = []
+def _match_terms(
+    conn, terms: list[str], domains, per_term: int
+) -> list[tuple[str, list[dict]]]:
+    pools: list[tuple[str, list[dict]]] = []
     for term in terms:
         match_query = build_match_query([term])
         if not match_query:
@@ -102,12 +104,14 @@ def _match_terms(conn, terms: list[str], domains, per_term: int) -> list[list[di
             )
         )
         if rows:
-            pools.append(rows)
+            pools.append((term, rows))
     return pools
 
 
-def _like_terms(conn, terms: list[str], domains, per_term: int) -> list[list[dict]]:
-    pools: list[list[dict]] = []
+def _like_terms(
+    conn, terms: list[str], domains, per_term: int
+) -> list[tuple[str, list[dict]]]:
+    pools: list[tuple[str, list[dict]]] = []
     for term in terms:
         params: list = [f"%{_escape_like(term)}%"]
         where = _domain_clause(domains, params)
@@ -119,25 +123,25 @@ def _like_terms(conn, terms: list[str], domains, per_term: int) -> list[list[dic
             )
         )
         if rows:
-            pools.append(rows)
+            pools.append((term, rows))
     return pools
 
 
-def _interleave(pools: list[list[dict]], limit: int) -> list[dict]:
+def _interleave(pools: list[tuple[str, list[dict]]], limit: int) -> list[dict]:
     """按词轮转取用：让每个词都有自己的配额，避免常见词淹没稀有词。"""
     merged: list[dict] = []
     seen: set = set()
-    queues = [list(pool) for pool in pools]
+    queues = [(term, list(rows)) for term, rows in pools]
     while len(merged) < limit and any(queues):
         progressed = False
-        for queue in queues:
+        for term, queue in queues:
             while queue and len(merged) < limit:
                 row = queue.pop(0)
                 key = (row["doc_id"], row["start_line"])
                 if key in seen:
                     continue
                 seen.add(key)
-                merged.append(row)
+                merged.append({**row, "matched_term": term})
                 progressed = True
                 break
         if not progressed:

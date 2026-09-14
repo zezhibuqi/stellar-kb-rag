@@ -235,7 +235,9 @@ POOL_CHAIN = "chain"
 POOL_GAP = "gap"
 
 
-def _pool_limit(pool: str) -> int:
+def _pool_limit(pool: str, state: dict | None = None) -> int:
+    if state is not None and pool in state.get("limits", {}):
+        return state["limits"][pool]
     if pool == POOL_CHAIN:
         return Config.AGENT_CHAIN_EVIDENCE_BUDGET
     if pool == POOL_GAP:
@@ -243,12 +245,34 @@ def _pool_limit(pool: str) -> int:
     return Config.AGENT_EVIDENCE_GLOBAL
 
 
+def _effective_limits(sub_questions: list[dict]) -> dict:
+    """池额度：链式池按需求动态计算——每个链式子问题都要拿到完整配额，
+    否则规划器多拆一个子问题就会把排在后面的链式义务饿死；安全阀负责封顶，
+    避免子问题很多时把提示词撑爆。缺口池保持固定（它是机会性补查）。"""
+    knowledge_items = [item for item in sub_questions if item["source"] != SOURCE_ORDER]
+    chain_count = sum(
+        1 for item in knowledge_items if item.get("pool") == POOL_CHAIN
+    )
+    chain_limit = min(
+        Config.AGENT_EVIDENCE_PER_SUB * max(1, chain_count),
+        Config.AGENT_CHAIN_EVIDENCE_BUDGET,
+    )
+    limits = {
+        POOL_ROUND_ONE: Config.AGENT_EVIDENCE_GLOBAL,
+        POOL_GAP: Config.AGENT_GAP_EVIDENCE_BUDGET,
+    }
+    if chain_count:
+        # 只在真的存在链式项时写入，避免被后续批次覆盖成 0 项对应的额度
+        limits[POOL_CHAIN] = chain_limit
+    return limits
+
+
 def _interleave(
     pools: list[list[dict]], per_limit: int, state: dict, pool: str
 ) -> list[dict]:
     """按查询变体轮转取用，受每子问题配额与本池额度双重约束。"""
     items: list[dict] = []
-    limit = _pool_limit(pool)
+    limit = _pool_limit(pool, state)
     while len(items) < per_limit and state[pool] < limit and any(pools):
         progressed = False
         for candidates in pools:
@@ -260,6 +284,7 @@ def _interleave(
                     candidate.get("doc_id"),
                     candidate.get("parent_start_line"),
                     candidate.get("parent_end_line"),
+                    candidate.get("chunk_id"),
                 )
                 if key in state["seen"]:
                     continue
@@ -282,6 +307,7 @@ def collect_evidence(
     配额——否则池额度偏紧时，排在后面的子问题（往往正是链式义务）一条也拿不到。
     """
     state = state if state is not None else new_evidence_state()
+    state.setdefault("limits", {}).update(_effective_limits(sub_questions))
     per_sub: dict[int, dict] = {}
     per_limit = Config.AGENT_EVIDENCE_PER_SUB
     global_limit = Config.AGENT_EVIDENCE_GLOBAL
@@ -331,7 +357,7 @@ def collect_evidence(
         pool = sub_question.get("pool", POOL_ROUND_ONE)
         processed_knowledge += 1
         remaining_items = max(1, knowledge_count - processed_knowledge + 1)
-        budget_left = max(0, _pool_limit(pool) - state[pool])
+        budget_left = max(0, _pool_limit(pool, state) - state[pool])
         allowance = max(
             1, min(per_limit, -(-budget_left // remaining_items))
         )
@@ -575,6 +601,7 @@ def build_round_two_plan(
     sub_questions: list[dict] = []
     unresolved_pending: list[dict] = []
     added_queries: list[str] = []
+    seen_intents: set = set()
     offset = len(sub_results)
     results_by_id = {item["id"]: item for item in sub_results}
     fallback_used = False
@@ -600,6 +627,14 @@ def build_round_two_plan(
         )
 
     for item in pending or []:
+        intent_key = _normalize_query(_strip_placeholders(item["query"]))
+        if intent_key and intent_key in seen_intents:
+            # 同一意图的重复待定项（例如「SC-500 年报释义 正式全称」与
+            # 「SC-300 年报释义 正式全称」）只保留第一个，避免无谓占用链式池
+            logger.info("待定子问题意图重复，跳过：%s", item["query"])
+            continue
+        if intent_key:
+            seen_intents.add(intent_key)
         dependency = results_by_id.get(item.get("depends_on"))
         entities = dependency["key_entities"] if dependency else []
         if not entities:
@@ -867,7 +902,9 @@ def run_enhanced(
                     "chain": state["chain"],
                     "gap": state["gap"],
                     "round1_limit": Config.AGENT_EVIDENCE_GLOBAL,
-                    "chain_limit": Config.AGENT_CHAIN_EVIDENCE_BUDGET,
+                    "chain_limit": state.get("limits", {}).get(
+                        POOL_CHAIN, Config.AGENT_CHAIN_EVIDENCE_BUDGET
+                    ),
                     "gap_limit": Config.AGENT_GAP_EVIDENCE_BUDGET,
                 },
             )

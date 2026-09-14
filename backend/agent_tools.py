@@ -69,6 +69,46 @@ def rrf_fuse(channels: list[list[dict]], top_n: int, rrf_k: int | None = None) -
     return [first_seen[key] for key, _ in ordered[:top_n]]
 
 
+def _row_from_document(document) -> dict:
+    meta = document.metadata or {}
+    return _candidate(
+        meta.get("doc_id"),
+        meta.get("chunk_id"),
+        meta.get("filename", ""),
+        meta.get("domain", ""),
+        meta.get("start_line"),
+        meta.get("parent_type", ""),
+        meta.get("parent_start_line"),
+        meta.get("parent_end_line"),
+        document.page_content,
+    )
+
+
+def interleave_keyword_hits(ranked: list, keyword_rows: list[dict]) -> list[dict]:
+    """把关键词通道的字面命中穿插进重排结果（席位保护）。
+
+    重排按语义相似度打分，字面精确但语义分低的块（如年报释义表）会被整体
+    淘汰——而它恰恰是"正式全称"这类问题的唯一依据。保留固定席位后，
+    每子问题取前几条时就不会漏掉它。
+    """
+    ordered = [_row_from_document(document) for document in ranked]
+    # 按「最稀有词优先」挑保留席位：命中数越少的词越有区分度，
+    # 而按列表顺序取前几条会取到常见词（如"年报"）的命中，形同没保留
+    by_term: dict[str, list[dict]] = {}
+    for row in keyword_rows:
+        by_term.setdefault(row.get("matched_term", ""), []).append(row)
+    rarest_first = sorted(by_term.values(), key=len)
+    reserved: list[dict] = []
+    for group in rarest_first:
+        if len(reserved) >= Config.AGENT_KEYWORD_RESERVED:
+            break
+        reserved.append(group[0])
+    for position, row in enumerate(reserved):
+        insert_at = min(len(ordered), position * 2 + 1)
+        ordered.insert(insert_at, row)
+    return ordered
+
+
 def build_knowledge_search(
     user_role: str,
     k: int = DEFAULT_TOP_K,
@@ -153,38 +193,26 @@ def build_knowledge_search(
         ]
         ranked = rerank_top_n(documents, query, top_n=Config.AGENT_RERANK_TOP_N)
 
+        # 重排后为关键词字面命中保留席位（见 interleave_keyword_hits 的说明）
         items: list[dict] = []
         seen: set = set()
-        for document in ranked:
-            meta = document.metadata or {}
+        for candidate in interleave_keyword_hits(ranked, keyword_rows):
             key = chroma_store.evidence_unit_key(
-                meta.get("doc_id"),
-                meta.get("parent_start_line"),
-                meta.get("parent_end_line"),
+                candidate.get("doc_id"),
+                candidate.get("parent_start_line"),
+                candidate.get("parent_end_line"),
+                candidate.get("chunk_id"),
             )
             if key in seen:
                 continue
             seen.add(key)
             text = chroma_store.expand_evidence_unit(
-                meta.get("doc_id"),
-                meta.get("parent_start_line"),
-                meta.get("parent_end_line"),
-                meta.get("start_line"),
+                candidate.get("doc_id"),
+                candidate.get("parent_start_line"),
+                candidate.get("parent_end_line"),
+                candidate.get("start_line"),
             )
-            items.append(
-                {
-                    "doc_id": meta.get("doc_id"),
-                    "filename": meta.get("filename", ""),
-                    "domain": meta.get("domain", ""),
-                    "chunk_id": meta.get("chunk_id"),
-                    "chunk_type": meta.get("chunk_type", ""),
-                    "start_line": meta.get("start_line"),
-                    "parent_type": meta.get("parent_type", ""),
-                    "parent_start_line": meta.get("parent_start_line"),
-                    "parent_end_line": meta.get("parent_end_line"),
-                    "text": text or document.page_content,
-                }
-            )
+            items.append({**candidate, "text": text or candidate.get("text", "")})
             if len(items) >= limit:
                 break
 

@@ -79,9 +79,14 @@ class Config:
     AGENT_LIKE_TOP_K = int(os.getenv("AGENT_LIKE_TOP_K", "20"))
     # RRF 融合常数：只用两路的名次，不比较各自的分值
     AGENT_RRF_K = int(os.getenv("AGENT_RRF_K", "60"))
-    # 第二轮的两个独立预算池（ADR 0010）：链式义务不该被机会主义的补查抢占
+    # 工具返回的候选里为「关键词字面命中」保留的席位数：实测释义表这类
+    # 字面精确但语义分低的块会被重排整体淘汰，需要席位保护
+    AGENT_KEYWORD_RESERVED = int(os.getenv("AGENT_KEYWORD_RESERVED", "2"))
+    # 第二轮的两个独立预算池（ADR 0010）：链式义务不该被机会主义的补查抢占。
+    # 链式池按需求动态计算（每子问题配额 × 链式子问题数），这里的值是**安全阀**：
+    # 规划器拆出的子问题数量是可变的，固定池必然在某些轮次饿死链式义务。
     AGENT_CHAIN_EVIDENCE_BUDGET = int(
-        os.getenv("AGENT_CHAIN_EVIDENCE_BUDGET", "6")
+        os.getenv("AGENT_CHAIN_EVIDENCE_BUDGET", "15")
     )
     AGENT_GAP_EVIDENCE_BUDGET = int(os.getenv("AGENT_GAP_EVIDENCE_BUDGET", "4"))
     AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))

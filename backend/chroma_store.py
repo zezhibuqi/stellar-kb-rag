@@ -103,10 +103,27 @@ def similarity_search_with_scores(
 
 
 def evidence_unit_key(
-    doc_id: int, parent_start_line: int | None, parent_end_line: int | None
+    doc_id: int,
+    parent_start_line: int | None,
+    parent_end_line: int | None,
+    chunk_id: int | None = None,
 ) -> tuple:
-    """证据单元去重键（ADR 0009）：同一张表的多个分段只展开一次。"""
-    return (int(doc_id), int(parent_start_line or 0), int(parent_end_line or 0))
+    """证据单元去重键（ADR 0009）：同一张表的多个分段只展开一次。
+
+    退化规则：当证据单元异常大（例如年报没有 Markdown 标题、整篇被当成一个
+    章节）时，按证据单元去重会把整份文档折叠成一条候选——实测 510 个切块
+    全落在同一个区间。此时改用切块粒度去重，保证同一文档内多个不同块可以
+    同时入选。表与小章节不受影响，原来的去重意图仍然成立。
+    """
+    start = int(parent_start_line or 0)
+    end = int(parent_end_line or 0)
+    if chunk_id is not None and (end - start) > OVERSIZED_UNIT_LINES:
+        return (int(doc_id), "chunk", int(chunk_id))
+    return (int(doc_id), start, end)
+
+
+# 证据单元超过这么多行就认为它过大（去重退化为切块粒度）
+OVERSIZED_UNIT_LINES = 200
 
 
 def expand_evidence_unit(

@@ -322,3 +322,37 @@ def test_pools_do_not_compete_for_budget(monkeypatch):
     assert gap_total == 1, "缺口池只应拿 1 条"
     assert len(per_sub[9]["items"]) == 2, "链式池不受缺口池影响"
     assert state["chain"] == 2 and state["gap"] == 1
+
+
+def test_chain_budget_scales_with_sub_question_count(monkeypatch):
+    """链式池按需求动态计算：规划器多拆子问题不会再饿死排在后面的链式义务。"""
+    monkeypatch.setattr(Config, "AGENT_EVIDENCE_PER_SUB", 3)
+    monkeypatch.setattr(Config, "AGENT_CHAIN_EVIDENCE_BUDGET", 15)
+    items = [
+        {"source": "knowledge", "pool": orchestrator.POOL_CHAIN} for _ in range(4)
+    ]
+    assert orchestrator._effective_limits(items)["chain"] == 12
+
+    # 安全阀仍然生效：子问题再多也不超过上限
+    many = [
+        {"source": "knowledge", "pool": orchestrator.POOL_CHAIN} for _ in range(9)
+    ]
+    assert orchestrator._effective_limits(many)["chain"] == 15
+
+
+def test_pending_intent_duplicates_are_skipped():
+    """意图相同的重复待定子问题只保留第一个，不再白占链式池额度。"""
+    first = _pending()[0]
+    second = dict(first, id=3, depends_on=2)
+    dependency = _round_one_result(["SC-300"])
+    other = _round_one_result(["SC-400"])
+    other["id"] = 2
+    plan = orchestrator.build_round_two_plan(
+        [dependency, other],
+        [],
+        pending=[first, second],
+        limit=8,
+        question="原问题",
+    )
+    assert len(plan["sub_questions"]) == 1
+    assert plan["sub_questions"][0]["query"].startswith("SC-300")
