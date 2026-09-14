@@ -13,8 +13,10 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 from auth import require_auth
 from config import Config
-from conversations_api import message_payload, owned_conversation
+from conversations_api import owned_conversation
 from errors import api_error
+import llm
+import orchestrator
 from models import (
     create_message,
     list_messages,
@@ -28,7 +30,7 @@ from reranker import RerankerError
 
 chat_bp = Blueprint("chat", __name__, url_prefix="/api")
 
-SUPPORTED_MODES = ("standard",)
+SUPPORTED_MODES = ("standard", "enhanced")
 
 
 def _sse(payload: dict) -> str:
@@ -41,12 +43,14 @@ def _finalize(
     parts: list[str],
     sources: list,
     status: str,
+    trace: dict | None = None,
 ) -> None:
     update_message(
         message_id,
         content="".join(parts),
         status=status,
         sources_json=json.dumps(sources, ensure_ascii=False),
+        trace_json=json.dumps(trace, ensure_ascii=False) if trace else None,
     )
     touch_conversation(conversation_id)
 
@@ -71,6 +75,15 @@ def chat():
         return api_error(f"暂不支持的模式：{mode}", "MODE_UNAVAILABLE", 400)
 
     stream = bool(data.get("stream", False))
+    if mode == "enhanced":
+        if not llm.get_active_provider().agent_capable:
+            return api_error(
+                "当前模型不支持增强模式", "MODE_UNAVAILABLE", 400
+            )
+        if not stream:
+            return api_error(
+                "增强模式仅支持流式调用", "MODE_REQUIRES_STREAM", 400
+            )
 
     # 上下文由服务端从会话消息中截取，不再接收前端 history
     history = recent_context_messages(conversation_id, Config.CHAT_HISTORY_TURNS)
@@ -79,13 +92,20 @@ def chat():
         update_conversation_title(conversation_id, question[:20])
     touch_conversation(conversation_id)
 
+    trace: dict | None = None
     try:
-        result = answer_question(
-            question,
-            history=history,
-            user_role=g.user["role"],
-            stream=stream,
-        )
+        if mode == "enhanced":
+            trace = {}
+            result = orchestrator.run_enhanced(
+                question, g.user["role"], history, trace
+            )
+        else:
+            result = answer_question(
+                question,
+                history=history,
+                user_role=g.user["role"],
+                stream=stream,
+            )
     except RerankerError as exc:
         create_message(conversation_id, "assistant", "", mode=mode, status="failed")
         return api_error(str(exc) or "重排服务异常", "RERANKER_ERROR", 500)
@@ -126,7 +146,7 @@ def chat():
             status = "failed"
             yield _sse({"error": "生成失败，请稍后重试"})
         finally:
-            _finalize(message_id, conversation_id, parts, sources, status)
+            _finalize(message_id, conversation_id, parts, sources, status, trace)
 
     return Response(
         stream_with_context(generate()),

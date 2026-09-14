@@ -32,6 +32,9 @@ class ModelProvider:
     # scnet GLM-5-Base 上 response_format=json_object 会返回乱序文本（finish=abort），
     # 不支持的能力需在注册表中显式关闭
     supports_response_format: bool = True
+    # 增强模式（编排式问答）需要可靠的结构化输出与低延迟；不具备该标志的提供方
+    # 在增强模式下不可选中，系统不会为了跑通而在背后换模型（ADR 0008）
+    agent_capable: bool = False
 
     @property
     def configured(self) -> bool:
@@ -47,6 +50,7 @@ def _build_providers() -> dict[str, ModelProvider]:
             base_url=Config.DEEPSEEK_BASE_URL,
             model="deepseek-v4-flash",
             api_key=Config.DEEPSEEK_API_KEY,
+            agent_capable=True,
         ),
         ModelProvider(
             id="scnet-glm5base",
@@ -65,6 +69,7 @@ def _build_providers() -> dict[str, ModelProvider]:
             base_url=Config.SILICONFLOW_BASE_URL,
             model="deepseek-ai/DeepSeek-V4-Flash",
             api_key=Config.SILICONFLOW_API_KEY,
+            agent_capable=True,
         ),
         ModelProvider(
             id="xiaomi-mimov2.5",

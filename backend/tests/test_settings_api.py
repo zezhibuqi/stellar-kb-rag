@@ -75,8 +75,9 @@ def test_get_model_settings_shape(client):
             "platform",
             "base_url",
             "model",
-            "api_key_configured",
-            "active",
+                "api_key_configured",
+                "agent_capable",
+                "active",
         }
 
 

@@ -62,6 +62,21 @@ class Config:
     # 会话上下文（服务端统一截取的轮数）
     CHAT_HISTORY_TURNS = int(os.getenv("CHAT_HISTORY_TURNS", "10"))
 
+    # 增强模式（编排式问答）
+    AGENT_MAX_SUB_QUESTIONS = int(os.getenv("AGENT_MAX_SUB_QUESTIONS", "8"))
+    AGENT_EVIDENCE_PER_SUB = int(os.getenv("AGENT_EVIDENCE_PER_SUB", "2"))
+    AGENT_EVIDENCE_GLOBAL = int(os.getenv("AGENT_EVIDENCE_GLOBAL", "10"))
+    AGENT_SEARCH_CANDIDATES = int(os.getenv("AGENT_SEARCH_CANDIDATES", "3"))
+    AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))
+    AGENT_TOTAL_BUDGET = int(os.getenv("AGENT_TOTAL_BUDGET", "120"))
+    # 调用 token 预算：思考型模型会先花掉大量预算再输出 JSON。
+    # 实测规划一次就用掉约 2900 token（其中 2767 是 reasoning），
+    # 因此预算必须显著高于典型值，否则会返回空内容并触发回退。
+    AGENT_PLAN_MAX_TOKENS = int(os.getenv("AGENT_PLAN_MAX_TOKENS", "10000"))
+    AGENT_SUB_ANSWER_MAX_TOKENS = int(
+        os.getenv("AGENT_SUB_ANSWER_MAX_TOKENS", "6000")
+    )
+
     # 上传限制
     UPLOAD_MAX_SIZE_MB = int(os.getenv("UPLOAD_MAX_SIZE_MB", "10"))
 
