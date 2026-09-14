@@ -69,6 +69,13 @@ class Config:
     AGENT_SEARCH_CANDIDATES = int(os.getenv("AGENT_SEARCH_CANDIDATES", "3"))
     AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))
     AGENT_TOTAL_BUDGET = int(os.getenv("AGENT_TOTAL_BUDGET", "120"))
+    # 调用 token 预算：思考型模型会先花掉大量预算再输出 JSON。
+    # 实测规划一次就用掉约 2900 token（其中 2767 是 reasoning），
+    # 因此预算必须显著高于典型值，否则会返回空内容并触发回退。
+    AGENT_PLAN_MAX_TOKENS = int(os.getenv("AGENT_PLAN_MAX_TOKENS", "10000"))
+    AGENT_SUB_ANSWER_MAX_TOKENS = int(
+        os.getenv("AGENT_SUB_ANSWER_MAX_TOKENS", "6000")
+    )
 
     # 上传限制
     UPLOAD_MAX_SIZE_MB = int(os.getenv("UPLOAD_MAX_SIZE_MB", "10"))

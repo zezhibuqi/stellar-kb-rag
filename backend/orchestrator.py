@@ -32,16 +32,16 @@ COVERAGE_PARTIAL = "partial"
 COVERAGE_MISSING = "missing"
 COVERAGES = (COVERAGE_SUFFICIENT, COVERAGE_PARTIAL, COVERAGE_MISSING)
 
-# 单次子答案调用的 token 预算。同样要给足：思考型/推理型模型会先花掉大量
-# 预算再输出 JSON，实测 800 在证据较长（如年报片段）时会被耗尽并抛错，
-# 表现为子答案空空如也、覆盖状态为缺失。
-SUB_ANSWER_MAX_TOKENS = 3000
+# 单次子答案调用的 token 预算。同样要给足：推理型模型会先花掉大量预算再输出
+# JSON，实测 800 在证据较长（如年报片段）时会被耗尽并抛错，表现为子答案
+# 空空如也、覆盖状态为缺失。取值走配置，便于按实际用量调整。
+SUB_ANSWER_MAX_TOKENS = Config.AGENT_SUB_ANSWER_MAX_TOKENS
 
-# 规划调用的 token 预算。注意不能沿用提供方的 router_max_tokens（默认 300）：
-# 那是给标准模式的短路由提示词配的，规划提示词更长、输出 JSON 更大。
-# 实测 DeepSeek-V4-Flash 在两个问题上分别用 300 与 1200 都被推理耗尽、
-# 返回空内容（finish_reason=length）导致回退，因此这里给足预算。
-PLAN_MAX_TOKENS = 3000
+# 规划调用的 token 预算。不能沿用提供方的 router_max_tokens（默认 300）：
+# 那是给标准模式的短路由提示词配的。实测 DeepSeek-V4-Flash 在链式问题上
+# 300、1200 均被推理耗尽（返回空内容、finish_reason=length、触发回退），
+# 3000 也只是压线通过，因此默认给到 10000 并走配置。
+PLAN_MAX_TOKENS = Config.AGENT_PLAN_MAX_TOKENS
 
 _PLAN_EXAMPLES = """示例1（并列型，同一实体的多个属性）：
 用户：2025 年动力电池系统的营收 / 占比 / 毛利率 / 销量？

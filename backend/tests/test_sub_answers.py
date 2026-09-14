@@ -134,6 +134,23 @@ def test_no_sub_questions_returns_empty():
     )
 
 
+def test_sub_answer_uses_configured_token_budget(monkeypatch):
+    captured = {}
+
+    def fake_invoke_json(prompt, **kwargs):
+        captured.update(kwargs)
+        return {"answer": "A", "coverage": "sufficient"}
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", fake_invoke_json)
+    orchestrator.answer_sub_questions(
+        {"sub_questions": [_sub(1, "a")]},
+        "问题",
+        _search([_knowledge_item(1, 1, 2)]),
+        lambda *a: {},
+    )
+    assert captured["max_tokens"] == Config.AGENT_SUB_ANSWER_MAX_TOKENS
+
+
 def _round_one_result(key_entities):
     return {
         "id": 1,

@@ -134,4 +134,5 @@ def test_plan_requests_its_own_token_budget(monkeypatch):
 
     monkeypatch.setattr(orchestrator.llm, "invoke_json", fake_invoke_json)
     orchestrator.plan_question("问题")
-    assert captured["max_tokens"] == orchestrator.PLAN_MAX_TOKENS
+    assert captured["max_tokens"] == Config.AGENT_PLAN_MAX_TOKENS
+    assert Config.AGENT_PLAN_MAX_TOKENS >= 8000, "预算需显著高于实测推理用量"
