@@ -6,6 +6,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
 import chroma_store
+import keyword_index
 from models import close_connection, get_document, update_document_status
 from splitter import split_markdown
 
@@ -46,6 +47,13 @@ def _process_document(doc_id: int) -> None:
     count = chroma_store.upsert_chunks(
         doc_id, doc["domain_name"], doc["filename"], chunks
     )
+
+    # 关键词索引（ADR 0010）：写入失败不阻塞灌库，只在 keyword_indexed_at 留痕，
+    # 由回填脚本或下次重灌补上
+    try:
+        keyword_index.index_document(doc_id)
+    except Exception:  # noqa: BLE001 - 次要通道不得拖垮主流程
+        logger.exception("文档 %s 关键词索引失败（不影响灌库结果）", doc_id)
 
     if get_document(doc_id) is None:
         logger.info("文档 %s 在入库期间被删除，清理已写入向量", doc_id)
