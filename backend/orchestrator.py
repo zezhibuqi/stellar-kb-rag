@@ -32,13 +32,16 @@ COVERAGE_PARTIAL = "partial"
 COVERAGE_MISSING = "missing"
 COVERAGES = (COVERAGE_SUFFICIENT, COVERAGE_PARTIAL, COVERAGE_MISSING)
 
-# 单次子答案调用的 token 预算（要在 JSON 里放下答案、覆盖状态与中间实体）
-SUB_ANSWER_MAX_TOKENS = 800
+# 单次子答案调用的 token 预算。同样要给足：思考型/推理型模型会先花掉大量
+# 预算再输出 JSON，实测 800 在证据较长（如年报片段）时会被耗尽并抛错，
+# 表现为子答案空空如也、覆盖状态为缺失。
+SUB_ANSWER_MAX_TOKENS = 3000
 
 # 规划调用的 token 预算。注意不能沿用提供方的 router_max_tokens（默认 300）：
-# 那是给标准模式的短路由提示词配的，规划提示词更长、输出 JSON 更大，
-# 300 会被推理耗尽并返回空内容（实测 DeepSeek-V4-Flash 即如此）。
-PLAN_MAX_TOKENS = 1200
+# 那是给标准模式的短路由提示词配的，规划提示词更长、输出 JSON 更大。
+# 实测 DeepSeek-V4-Flash 在两个问题上分别用 300 与 1200 都被推理耗尽、
+# 返回空内容（finish_reason=length）导致回退，因此这里给足预算。
+PLAN_MAX_TOKENS = 3000
 
 _PLAN_EXAMPLES = """示例1（并列型，同一实体的多个属性）：
 用户：2025 年动力电池系统的营收 / 占比 / 毛利率 / 销量？
@@ -447,6 +450,23 @@ def _fill_placeholder(query: str, dependency_id, entity: str) -> str:
     return f"{entity} {query}"
 
 
+def _normalize_query(query: str) -> str:
+    return " ".join((query or "").split()).lower()
+
+
+def _is_redundant(query: str, existing: list[str]) -> bool:
+    """同一轮内已经查过（或被更宽的查询覆盖）就不再重复检索。
+
+    只与**本轮**已加入的查询比对：与历史查询做包含判断会误伤真正的细化检索
+    （例如第一轮查「SC-300」、第二轮要查「SC-300 循环寿命」）。
+    """
+    normalized = _normalize_query(query)
+    return any(
+        normalized == item or normalized in item or item in normalized
+        for item in existing
+    )
+
+
 def build_round_two_plan(
     sub_results: list[dict],
     unresolved_ids: list[int],
@@ -464,10 +484,12 @@ def build_round_two_plan(
     """
     sub_questions: list[dict] = []
     unresolved_pending: list[dict] = []
+    added_queries: list[str] = []
     offset = len(sub_results)
     results_by_id = {item["id"]: item for item in sub_results}
 
     def add(query: str, follow_up_of) -> None:
+        added_queries.append(_normalize_query(query))
         sub_questions.append(
             {
                 "id": offset + len(sub_questions) + 1,
@@ -500,6 +522,8 @@ def build_round_two_plan(
                     "sub_questions": sub_questions,
                     "unresolved_pending": unresolved_pending,
                 }
+            if _is_redundant(entity, added_queries):
+                continue
             add(entity, item["id"])
 
     return {
@@ -637,14 +661,15 @@ def run_enhanced(
         state,
     )
     for item in results:
-        yield _event(
-            {
-                "stage": "sub_answer",
-                "sub_question_id": item["id"],
-                "answer": item["answer"],
-                "coverage": item["coverage"],
-            }
-        )
+                yield _event(
+                    {
+                        "stage": "sub_answer",
+                        "sub_question_id": item["id"],
+                        "answer": item["answer"],
+                        "coverage": item["coverage"],
+                        "error": item["error"],
+                    }
+                )
 
     round_two_count = 0
     unresolved = unresolved_sub_questions(results)
@@ -671,6 +696,7 @@ def run_enhanced(
                     "sub_question_id": item["id"],
                     "answer": item["answer"],
                     "coverage": item["coverage"],
+                    "error": item["error"],
                     "follow_up": True,
                 }
             )

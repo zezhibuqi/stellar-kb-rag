@@ -178,3 +178,20 @@ def test_round_two_reports_pending_without_entities():
     )
     assert plan["sub_questions"] == []
     assert plan["unresolved_pending"] == pending
+
+
+def test_round_two_skips_entity_query_already_covered_by_pending():
+    """链式第二跳已经用该实体查过时，缺口补充不再用同一个实体重复检索。"""
+    result = _round_one_result(["SC-300"])
+    result["coverage"] = "partial"
+    plan = orchestrator.build_round_two_plan(
+        [result], [1], pending=_pending(), limit=8
+    )
+    assert len(plan["sub_questions"]) == 1
+    assert plan["sub_questions"][0]["query"].startswith("SC-300 单体质量能量密度")
+
+
+def test_round_two_keeps_distinct_entity_queries():
+    result = _round_one_result(["SC-300", "SC-400"])
+    plan = orchestrator.build_round_two_plan([result], [1], pending=None, limit=8)
+    assert [item["query"] for item in plan["sub_questions"]] == ["SC-300", "SC-400"]

@@ -80,9 +80,14 @@ def main() -> None:
                     print(f"  {item['id']}. {item['text']}")
             elif event.get("stage") == "sub_answer":
                 tag = "补充检索 " if event.get("follow_up") else ""
+                detail = (
+                    f"［{event['coverage']}］" if event.get("coverage") else ""
+                )
+                if event.get("error"):
+                    detail += f"（失败：{event['error']}）"
                 print(
                     f"{tag}子答案 {event['sub_question_id']}"
-                    f"［{event['coverage']}］：{event['answer']}"
+                    f"{detail}：{event['answer']}"
                 )
             elif event.get("stage"):
                 print(f"阶段：{event['stage']}")
