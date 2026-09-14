@@ -5,6 +5,7 @@ import pytest
 import agent_tools
 import chroma_store
 import embeddings
+import keyword_index
 from models import create_document
 
 
@@ -117,3 +118,60 @@ def test_order_query_returns_aggregation_for_aftersale():
 def test_order_query_empty_for_unknown_order():
     result = agent_tools.build_order_query("aftersale")({"order_no": "DD00000000000"})
     assert result["status"] == agent_tools.STATUS_EMPTY
+
+
+# ── 双通道与 RRF 融合（ADR 0010）─────────────────────────────────────────
+
+
+def _row(doc_id, start_line, name="f.md", text="内容"):
+    return agent_tools._candidate(
+        doc_id, 0, name, "finance", start_line, "table", start_line, start_line + 2, text
+    )
+
+
+def test_rrf_prefers_candidate_seen_by_both_channels():
+    vector = [_row(1, 10), _row(2, 20)]
+    keyword = [_row(2, 20), _row(3, 30)]
+    fused = agent_tools.rrf_fuse([vector, keyword], top_n=3, rrf_k=60)
+    assert (fused[0]["doc_id"], fused[0]["start_line"]) == (2, 20), "两路都认可的候选应上浮"
+    assert len(fused) == 3, "融合后应保留全部去重候选"
+
+
+def test_knowledge_search_uses_keyword_channel_when_vector_misses(monkeypatch):
+    doc_id = _seed_table()
+    keyword_index.index_document(doc_id)
+    # 模拟"向量通道完全召回不到、关键词通道能命中"的场景
+    monkeypatch.setattr(chroma_store, "similarity_search", lambda *a, **k: [])
+
+    search = agent_tools.build_knowledge_search("admin")
+    result = search("净利润")
+
+    assert result["status"] == agent_tools.STATUS_OK
+    assert result["items"][0]["doc_id"] == doc_id
+    assert result["retrieval"]["keyword_mode"] == "match"
+    assert result["retrieval"]["vector_hits"] == 0
+
+
+def test_knowledge_search_degrades_to_vector_when_keyword_channel_fails(monkeypatch):
+    _seed_table()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("索引未就绪")
+
+    monkeypatch.setattr(keyword_index, "search", boom)
+    search = agent_tools.build_knowledge_search("admin")
+    result = search("净利润")
+
+    assert result["status"] == agent_tools.STATUS_OK, "关键词通道失败不应影响回答"
+    assert result["retrieval"]["keyword_status"] == "error"
+    assert result["retrieval"]["keyword_hits"] == 0
+
+
+def test_keyword_channel_respects_role_permissions(monkeypatch):
+    """关键词通道是绕过 Chroma 的第二条路，漏掉领域过滤就是越权。"""
+    finance_id = _seed_table(domain="finance", filename="finance.md")
+    keyword_index.index_document(finance_id)
+    monkeypatch.setattr(chroma_store, "similarity_search", lambda *a, **k: [])
+
+    employee = agent_tools.build_knowledge_search("employee")("净利润")
+    assert employee["items"] == [], "employee 不应通过关键词通道拿到 finance 内容"

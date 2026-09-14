@@ -85,80 +85,109 @@ def _rows(cursor) -> list[dict]:
     ]
 
 
+def _match_terms(conn, terms: list[str], domains, per_term: int) -> list[list[dict]]:
+    pools: list[list[dict]] = []
+    for term in terms:
+        match_query = build_match_query([term])
+        if not match_query:
+            continue
+        params: list = [match_query]
+        where = _domain_clause(domains, params)
+        rows = _rows(
+            conn.execute(
+                f"SELECT {', '.join(_COLUMNS)}, content FROM chunk_index "
+                f"WHERE chunk_index MATCH ?{where} "
+                f"ORDER BY bm25(chunk_index) LIMIT ?",
+                params + [per_term],
+            )
+        )
+        if rows:
+            pools.append(rows)
+    return pools
+
+
+def _like_terms(conn, terms: list[str], domains, per_term: int) -> list[list[dict]]:
+    pools: list[list[dict]] = []
+    for term in terms:
+        params: list = [f"%{_escape_like(term)}%"]
+        where = _domain_clause(domains, params)
+        rows = _rows(
+            conn.execute(
+                f"SELECT {', '.join(_COLUMNS)}, content FROM chunk_index "
+                f"WHERE content LIKE ? ESCAPE '\\'{where} LIMIT ?",
+                params + [per_term],
+            )
+        )
+        if rows:
+            pools.append(rows)
+    return pools
+
+
+def _interleave(pools: list[list[dict]], limit: int) -> list[dict]:
+    """按词轮转取用：让每个词都有自己的配额，避免常见词淹没稀有词。"""
+    merged: list[dict] = []
+    seen: set = set()
+    queues = [list(pool) for pool in pools]
+    while len(merged) < limit and any(queues):
+        progressed = False
+        for queue in queues:
+            while queue and len(merged) < limit:
+                row = queue.pop(0)
+                key = (row["doc_id"], row["start_line"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(row)
+                progressed = True
+                break
+        if not progressed:
+            break
+    return merged
+
+
 def search(
     query: str, domains: list[str] | None = None, limit: int | None = None
 ) -> dict:
     """返回 {"rows": [...], "mode": "match"|"like"|"none"}。
 
-    MATCH 与 LIKE 是降级关系：短词直接 LIKE；MATCH 零命中时整条降级 LIKE。
-    LIKE 使用独立配额，不占用关键词通道的召回额度。
+    取词与执行规则（ADR 0010）：
+    - 每个词**单独**查询并按词轮转取用。合成一条 OR 查询会让常见词（如年份）
+      淹没有效词，把真正的目标块挤出配额。
+    - 长于 3 字的中文片段额外产出 2 字头/尾词，只用于 LIKE 兜底——整段在语料里
+      可能根本不存在（例：「年报释义」不存在，文档写的是「释义项」）。
+    - MATCH 与 LIKE 是降级关系：短词直接 LIKE；MATCH 整条零命中时才走 LIKE。
+      LIKE 使用独立配额，不占用关键词通道的召回额度。
     """
     limit = limit if limit is not None else Config.AGENT_KEYWORD_TOP_K
     terms = split_terms(query)
     if not terms:
         return {"rows": [], "mode": "none"}
 
-    long_terms = [term for term in terms if len(term) >= _MIN_MATCH_LEN]
-    match_query = build_match_query(long_terms)
-    conn = get_connection()
-
-    if match_query:
-        params: list = [match_query]
-        where = _domain_clause(domains, params)
-        sql = (
-            f"SELECT {', '.join(_COLUMNS)}, content FROM chunk_index "
-            f"WHERE chunk_index MATCH ?{where} "
-            f"ORDER BY bm25(chunk_index) LIMIT ?"
-        )
-        rows = _rows(conn.execute(sql, params + [limit]))
-        if rows:
-            return {"rows": rows, "mode": "match"}
-
-        # 长片段零命中：用头/中/尾片段再试一次（仍属 MATCH 路径）
-        fragments: list[str] = []
-        for term in long_terms:
-            if len(term) > _PHRASE_LEN and re.match(r"^[\u4e00-\u9fff]+$", term):
-                fragments.extend(_fragments(term))
-        fragment_query = build_match_query(list(dict.fromkeys(fragments)))
-        if fragment_query:
-            params = [fragment_query]
-            where = _domain_clause(domains, params)
-            rows = _rows(
-                conn.execute(
-                    f"SELECT {', '.join(_COLUMNS)}, content FROM chunk_index "
-                    f"WHERE chunk_index MATCH ?{where} "
-                    f"ORDER BY bm25(chunk_index) LIMIT ?",
-                    params + [limit],
-                )
-            )
-            if rows:
-                return {"rows": rows, "mode": "match"}
-
-    # LIKE 降级：短词、或 MATCH 整条零命中。
-    # 长中文片段额外吐出 2 字头/尾词——整段在语料里可能根本不存在
-    # （例：「年报释义」不存在，但文档里写的是「释义项」）。
-    short_terms = [term for term in terms if len(term) < _MIN_MATCH_LEN]
-    if not short_terms:
-        for term in terms:
+    match_terms: list[str] = []
+    like_terms: list[str] = []
+    for term in terms:
+        if len(term) >= _MIN_MATCH_LEN:
+            match_terms.append(term)
             if len(term) > _MIN_MATCH_LEN and re.match(r"^[\u4e00-\u9fff]+$", term):
-                short_terms.extend([term[:2], term[-2:]])
-    like_terms = list(dict.fromkeys(short_terms or terms))[:5]
+                like_terms.extend([term[:2], term[-2:]])
+        else:
+            like_terms.append(term)
+    match_terms = list(dict.fromkeys(match_terms))
+    like_terms = list(dict.fromkeys(like_terms))[:5]
 
-    # 先 AND 精确匹配；无果再 OR 放宽（兜底以召回为先，配额与重排控制精度）
-    for join in (" AND ", " OR "):
-        clause = join.join("content LIKE ? ESCAPE '\\'" for _ in like_terms)
-        params = [f"%{_escape_like(term)}%" for term in like_terms]
-        where = _domain_clause(domains, params)
-        rows = _rows(
-            conn.execute(
-                f"SELECT {', '.join(_COLUMNS)}, content FROM chunk_index "
-                f"WHERE {clause}{where} LIMIT ?",
-                params + [Config.AGENT_LIKE_TOP_K],
-            )
-        )
-        if rows:
-            return {"rows": rows, "mode": "like"}
-    return {"rows": [], "mode": "none"}
+    conn = get_connection()
+    per_term = max(5, limit // max(1, len(match_terms)))
+    match_pools = _match_terms(conn, match_terms, domains, per_term)
+    # 降级按**词**判定而非按整条查询：短词、以及长片段派生的 2 字头/尾词，
+    # 始终走 LIKE 兜底。否则「SC-300」命中就会掩盖「释义」无法字面匹配的事实。
+    like_pools = _like_terms(conn, like_terms, domains, Config.AGENT_LIKE_TOP_K)
+    pools = match_pools + like_pools
+    if not pools:
+        return {"rows": [], "mode": "none"}
+    return {
+        "rows": _interleave(pools, limit),
+        "mode": "match" if match_pools else "like",
+    }
 
 
 def index_document(doc_id: int) -> int:

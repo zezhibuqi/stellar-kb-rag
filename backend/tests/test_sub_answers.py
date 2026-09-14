@@ -188,17 +188,21 @@ def test_round_two_fills_placeholder_from_key_entities():
     assert plan["unresolved_pending"] == []
 
 
-def test_round_two_reports_pending_without_entities():
+def test_round_two_uses_intent_terms_when_entity_missing():
+    """拿不到中间实体时，用该子问题去掉占位符的意图词检索（不是整条原问题）。"""
     pending = _pending()
     plan = orchestrator.build_round_two_plan(
         [_round_one_result([])], [], pending=pending, limit=8
     )
-    assert plan["sub_questions"] == []
-    assert plan["unresolved_pending"] == pending
+    assert plan["unresolved_pending"] == []
+    assert (
+        plan["sub_questions"][0]["query"]
+        == "单体质量能量密度 25℃ 循环寿命"
+    )
 
 
-def test_round_two_falls_back_to_original_question():
-    """拿不到中间实体时，用用户原问题检索一次，而不是直接判缺失。"""
+def test_round_two_fallback_keeps_original_question_as_alt_query():
+    """意图词作主查询，原问题保留为备用查询（双查询交替取用）。"""
     plan = orchestrator.build_round_two_plan(
         [_round_one_result([])],
         [],
@@ -207,7 +211,11 @@ def test_round_two_falls_back_to_original_question():
         question="财务总监在年报里是以什么身份作出声明的？",
     )
     assert plan["unresolved_pending"] == []
-    assert plan["sub_questions"][0]["query"] == "财务总监在年报里是以什么身份作出声明的？"
+    assert plan["sub_questions"][0]["query"] == "单体质量能量密度 25℃ 循环寿命"
+    assert (
+        plan["sub_questions"][0]["alt_query"]
+        == "财务总监在年报里是以什么身份作出声明的？"
+    )
 
 
 def test_round_two_marks_alt_query_for_gap_fill():

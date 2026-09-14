@@ -547,10 +547,15 @@ def build_round_two_plan(
         dependency = results_by_id.get(item.get("depends_on"))
         entities = dependency["key_entities"] if dependency else []
         if not entities:
-            # 拿不到中间实体：退回用原问题检索一次（整问的措辞往往能命中）
-            if question and not fallback_used and not _is_redundant(question, added_queries):
+            # 拿不到中间实体：优先用该子问题**去掉占位符的意图词**检索
+            # （它比整条原问题更贴近文档用词），实在没有再退回原问题
+            intent_terms = _strip_placeholders(item["query"])
+            fallback_query = intent_terms or question or ""
+            if fallback_query and not fallback_used and not _is_redundant(
+                fallback_query, added_queries
+            ):
                 fallback_used = True
-                add(question, item.get("depends_on"))
+                add(fallback_query, item.get("depends_on"), alt_query=question)
             else:
                 unresolved_pending.append(item)
             continue
@@ -774,6 +779,6 @@ def run_enhanced(
 
     yield _event({"stage": "synthesizing"})
     prompt = build_synthesis_prompt(question, results, history)
-    for token in llm.stream(prompt):
+    for token in llm.stream(prompt, max_tokens=Config.AGENT_SYNTHESIS_MAX_TOKENS):
         yield _event({"token": token})
     yield _event({"done": True, "sources": collect_sources(results)})

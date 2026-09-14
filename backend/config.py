@@ -77,6 +77,8 @@ class Config:
     AGENT_KEYWORD_TOP_K = int(os.getenv("AGENT_KEYWORD_TOP_K", "80"))
     AGENT_FUSION_TOP_N = int(os.getenv("AGENT_FUSION_TOP_N", "30"))
     AGENT_LIKE_TOP_K = int(os.getenv("AGENT_LIKE_TOP_K", "20"))
+    # RRF 融合常数：只用两路的名次，不比较各自的分值
+    AGENT_RRF_K = int(os.getenv("AGENT_RRF_K", "60"))
     AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))
     AGENT_TOTAL_BUDGET = int(os.getenv("AGENT_TOTAL_BUDGET", "120"))
     # 调用 token 预算：思考型模型会先花掉大量预算再输出 JSON。
@@ -85,6 +87,11 @@ class Config:
     AGENT_PLAN_MAX_TOKENS = int(os.getenv("AGENT_PLAN_MAX_TOKENS", "10000"))
     AGENT_SUB_ANSWER_MAX_TOKENS = int(
         os.getenv("AGENT_SUB_ANSWER_MAX_TOKENS", "6000")
+    )
+    # 合成调用的 token 预算：增强模式的合成提示词包含多个子问题的证据，
+    # 比标准模式长得多，沿用 LLM_MAX_TOKENS(4096) 会被推理耗尽、返回空内容
+    AGENT_SYNTHESIS_MAX_TOKENS = int(
+        os.getenv("AGENT_SYNTHESIS_MAX_TOKENS", "8000")
     )
 
     # 上传限制

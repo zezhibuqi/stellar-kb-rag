@@ -158,15 +158,19 @@ def test_provider(provider: ModelProvider) -> str:
     return response.choices[0].message.content or ""
 
 
-def invoke(prompt: str, temperature: float | None = None) -> str:
+def invoke(
+    prompt: str, temperature: float | None = None, max_tokens: int | None = None
+) -> str:
     if temperature is None:
         temperature = Config.LLM_TEMPERATURE
+    if max_tokens is None:
+        max_tokens = Config.LLM_MAX_TOKENS
     provider = get_active_provider()
     response = get_client(provider).chat.completions.create(
         model=provider.model,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
-        max_tokens=Config.LLM_MAX_TOKENS,
+        max_tokens=max_tokens,
     )
     content = response.choices[0].message.content
     if not content:
@@ -212,15 +216,19 @@ def _parse_json_text(text: str) -> dict:
     return json.loads(text)
 
 
-def stream(prompt: str, temperature: float | None = None):
+def stream(
+    prompt: str, temperature: float | None = None, max_tokens: int | None = None
+):
     if temperature is None:
         temperature = Config.LLM_TEMPERATURE
+    if max_tokens is None:
+        max_tokens = Config.LLM_MAX_TOKENS
     provider = get_active_provider()
     response = get_client(provider).chat.completions.create(
         model=provider.model,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
-        max_tokens=Config.LLM_MAX_TOKENS,
+        max_tokens=max_tokens,
         stream=True,
     )
     emitted = False
