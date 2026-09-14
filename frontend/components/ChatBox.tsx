@@ -1,16 +1,28 @@
 "use client";
 
 import { MenuOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
-import { Button, Drawer, Empty, Grid, Input, Typography, message } from "antd";
+import {
+  Button,
+  Drawer,
+  Empty,
+  Grid,
+  Input,
+  Segmented,
+  Tooltip,
+  Typography,
+  message,
+} from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ConversationList from "@/components/ConversationList";
+import AnalysisPanel, { type SubProcess } from "@/components/AnalysisPanel";
 import SourceCard from "@/components/SourceCard";
 import {
   ApiRequestError,
   chatStream,
   createConversation,
+  getModelSettings,
   listConversationMessages,
   type ChatSource,
   type ConversationInfo,
@@ -23,6 +35,26 @@ interface ChatItem {
   role: "user" | "assistant";
   content: string;
   sources?: ChatSource[];
+  mode?: string;
+  planning?: boolean;
+  subProcess?: SubProcess[];
+}
+
+const MODE_KEY = "kb-chat-mode";
+
+/** 回放时从消息的 trace 还原分析过程 */
+function traceProcess(item: StoredMessage): SubProcess[] {
+  const trace = item.trace as
+    | { sub_questions?: Array<Record<string, unknown>> }
+    | null;
+  if (!trace?.sub_questions) return [];
+  return trace.sub_questions.map((entry) => ({
+    id: Number(entry.id ?? 0),
+    text: String(entry.query ?? ""),
+    answer: entry.answer ? String(entry.answer) : undefined,
+    coverage: entry.coverage ? String(entry.coverage) : undefined,
+    error: entry.error ? String(entry.error) : null,
+  }));
 }
 
 /** 回放历史消息时把非正常结束的状态显式标出来 */
@@ -47,11 +79,33 @@ export default function ChatBox() {
   const [loading, setLoading] = useState(false);
   const [listToken, setListToken] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mode, setMode] = useState("standard");
+  const [agentCapable, setAgentCapable] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const screens = Grid.useBreakpoint();
   const isNarrow = screens.lg === false;
+
+  // 模式选择记在本地；增强模式是否可用取决于当前模型。非管理员查不到模型设置，
+  // 此时按「可用」处理，由服务端的 400 校验兜底并给出提示。
+  useEffect(() => {
+    const stored = window.localStorage.getItem(MODE_KEY);
+    if (stored === "enhanced" || stored === "standard") setMode(stored);
+    getModelSettings()
+      .then((settings) => {
+        const active = settings.providers.find(
+          (item) => item.id === settings.active
+        );
+        setAgentCapable(Boolean(active?.agent_capable));
+      })
+      .catch(() => setAgentCapable(null));
+  }, []);
+
+  const changeMode = (value: string) => {
+    setMode(value);
+    window.localStorage.setItem(MODE_KEY, value);
+  };
 
   // 流式输出时若用户处于贴底位置则自动滚动跟随；用户上翻查看历史时不打扰。
   useEffect(() => {
@@ -75,6 +129,8 @@ export default function ChatBox() {
           role: item.role,
           content: replayContent(item),
           sources: item.sources,
+          mode: item.mode,
+          subProcess: traceProcess(item),
         }))
       );
     } catch (error) {
@@ -147,6 +203,7 @@ export default function ChatBox() {
       await chatStream(
         conversationId,
         question,
+        mode,
         {
           onToken: (token) => {
             answer += token;
@@ -156,6 +213,57 @@ export default function ChatBox() {
           onError: (text) => {
             finishWith(text);
             message.error(text);
+          },
+          onStage: (event) => {
+            const stage = String(event.stage);
+            if (stage === "planning") {
+              updateLast((item) => ({ ...item, planning: true }));
+              return;
+            }
+            if (stage === "planned") {
+              const rows = Array.isArray(event.sub_questions)
+                ? (event.sub_questions as Array<Record<string, unknown>>)
+                : [];
+              updateLast((item) => ({
+                ...item,
+                planning: false,
+                subProcess: rows.map((row) => ({
+                  id: Number(row.id ?? 0),
+                  text: String(row.text ?? ""),
+                  dependsOn: (row.depends_on as number | null) ?? null,
+                })),
+              }));
+              return;
+            }
+            if (stage === "sub_answer") {
+              const id = Number(event.sub_question_id ?? 0);
+              const patch: SubProcess = {
+                id,
+                text: "",
+                answer: String(event.answer ?? ""),
+                coverage: event.coverage ? String(event.coverage) : undefined,
+                error: event.error ? String(event.error) : null,
+                followUp: Boolean(event.follow_up),
+              };
+              updateLast((item) => {
+                const list = [...(item.subProcess ?? [])];
+                const index = list.findIndex((row) => row.id === id);
+                if (index >= 0) {
+                  list[index] = {
+                    ...list[index],
+                    ...patch,
+                    text: list[index].text || patch.text,
+                  };
+                } else {
+                  list.push(patch);
+                }
+                return { ...item, subProcess: list };
+              });
+              return;
+            }
+            if (stage === "synthesizing") {
+              updateLast((item) => ({ ...item, planning: false }));
+            }
           },
         },
         controller.signal
@@ -267,6 +375,11 @@ export default function ChatBox() {
                     <div className="chat-user-bubble">{item.content}</div>
                   ) : (
                     <>
+                      <AnalysisPanel
+                        subQuestions={item.subProcess ?? []}
+                        planning={item.planning}
+                        collapsed={item.content.length > 0}
+                      />
                       <div className="markdown-preview">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {item.content}
@@ -284,6 +397,29 @@ export default function ChatBox() {
         </div>
 
         <div style={{ flex: "none", padding: "12px 0 8px" }}>
+          <div style={{ marginBottom: 8 }}>
+            <Tooltip
+              title={
+                agentCapable === false
+                  ? "当前模型不支持增强模式，请让管理员切换到 DeepSeek 系模型"
+                  : ""
+              }
+            >
+              <Segmented
+                size="small"
+                value={mode}
+                onChange={(value) => changeMode(String(value))}
+                options={[
+                  { label: "标准模式", value: "standard" },
+                  {
+                    label: "增强模式",
+                    value: "enhanced",
+                    disabled: agentCapable === false,
+                  },
+                ]}
+              />
+            </Tooltip>
+          </div>
           <div className="chat-input-card">
             <Input.TextArea
               value={input}

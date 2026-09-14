@@ -265,6 +265,7 @@ export interface ModelProviderInfo {
   base_url: string;
   model: string;
   api_key_configured: boolean;
+  agent_capable: boolean;
   active: boolean;
 }
 
@@ -380,11 +381,14 @@ export interface ChatStreamHandlers {
   onDone: (sources: ChatSource[]) => void;
   onMessageId?: (messageId: number) => void;
   onError?: (error: string) => void;
+  /** 增强模式的过程事件：planning / planned / sub_answer / synthesizing */
+  onStage?: (event: Record<string, unknown>) => void;
 }
 
 export async function chatStream(
   conversationId: number,
   question: string,
+  mode: string,
   handlers: ChatStreamHandlers,
   signal?: AbortSignal
 ): Promise<void> {
@@ -397,7 +401,12 @@ export async function chatStream(
   const response = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ conversation_id: conversationId, question, stream: true }),
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      question,
+      mode,
+      stream: true,
+    }),
     signal,
   });
   if (!response.ok || !response.body) {
@@ -426,6 +435,9 @@ export async function chatStream(
         const event = JSON.parse(raw.slice(6)) as Record<string, unknown>;
         if (typeof event.message_id === "number") {
           handlers.onMessageId?.(event.message_id);
+        }
+        if (typeof event.stage === "string") {
+          handlers.onStage?.(event);
         }
         if (typeof event.token === "string") {
           handlers.onToken(event.token);
