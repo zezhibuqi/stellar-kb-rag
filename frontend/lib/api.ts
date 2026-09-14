@@ -352,6 +352,8 @@ export interface ChatSource {
   chunk_id: number | null;
   chunk_type: "text" | "table" | null;
   start_line: number | null;
+  /** 增强模式：该来源支撑的子问题编号；标准模式为 null */
+  sub_question_id?: number | null;
 }
 
 export interface RawDoc {

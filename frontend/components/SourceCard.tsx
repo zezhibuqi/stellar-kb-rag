@@ -20,6 +20,12 @@ export default function SourceCard({ sources }: { sources: ChatSource[] }) {
     setOpen(false);
   }, [sources]);
 
+  // 增强模式的来源带 sub_question_id：按子问题分组展示；
+  // 标准模式（无该字段）保持原来的平铺列表。
+  const hasSubQuestions = sources.some(
+    (source) => source.sub_question_id != null
+  );
+
   return (
     <div className="app-card source-collapse" style={{ marginTop: 20 }}>
       <Collapse
@@ -46,7 +52,20 @@ export default function SourceCard({ sources }: { sources: ChatSource[] }) {
                 )}
               </span>
             ),
-            children: sources.map((source, index) => {
+            children: sources.flatMap((source, index) => {
+              const previous = index > 0 ? sources[index - 1] : null;
+              const showLabel =
+                hasSubQuestions &&
+                source.sub_question_id !== previous?.sub_question_id;
+              const label = (
+                <Typography.Text
+                  key={`group-${index}`}
+                  type="secondary"
+                  style={{ fontSize: 12.5, display: "block", margin: "6px 0 2px" }}
+                >
+                  子问题 {source.sub_question_id ?? "—"}
+                </Typography.Text>
+              );
               const isDatabase = source.source_type === "database";
               const viewerUrl =
                 source.doc_id != null
@@ -54,7 +73,7 @@ export default function SourceCard({ sources }: { sources: ChatSource[] }) {
                       source.content_preview.slice(0, 60)
                     )}`
                   : null;
-              return (
+              const row = (
                 <div className="source-row" key={index}>
                   <span className={`source-icon${isDatabase ? " database" : ""}`}>
                     {isDatabase ? <DatabaseOutlined /> : <FileSearchOutlined />}
@@ -84,6 +103,7 @@ export default function SourceCard({ sources }: { sources: ChatSource[] }) {
                   )}
                 </div>
               );
+              return showLabel ? [label, row] : [row];
             }),
           },
         ]}
