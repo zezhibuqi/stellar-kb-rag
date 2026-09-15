@@ -110,8 +110,10 @@ def delete_doc(doc_id: int):
         return api_error("文档不存在", "NOT_FOUND", 404)
 
     import chroma_store
+    import keyword_index
 
     chroma_store.delete_by_doc_id(doc_id)
+    keyword_index.delete_document(doc_id)
     delete_document(doc_id)
 
     return jsonify({"message": "文档已删除"})

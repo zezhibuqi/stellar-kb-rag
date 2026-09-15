@@ -49,6 +49,19 @@ def check_components() -> dict:
         }
     except Exception as exc:  # noqa: BLE001
         components["llm_provider"] = {"status": "error", "message": str(exc)}
+
+    # 关键词通道（ADR 0010）：暴露尚未进入索引的文档数，
+    # 避免"索引缺失"被误读成"检索没搜到"
+    try:
+        import keyword_index
+
+        missing = len(keyword_index.missing_document_ids())
+        components["keyword_index"] = {
+            "status": "connected" if missing == 0 else "degraded",
+            "missing_documents": missing,
+        }
+    except Exception as exc:  # noqa: BLE001
+        components["keyword_index"] = {"status": "error", "message": str(exc)}
     return components
 
 

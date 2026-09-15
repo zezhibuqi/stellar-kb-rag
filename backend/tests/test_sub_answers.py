@@ -151,6 +151,61 @@ def test_sub_answer_uses_configured_token_budget(monkeypatch):
     assert captured["max_tokens"] == Config.AGENT_SUB_ANSWER_MAX_TOKENS
 
 
+def test_sub_answer_records_usage_and_elapsed(monkeypatch):
+    """trace 需要的每步耗时与 token 用量：子答案步逐个记录（设计文档 7.8）。"""
+
+    def fake_invoke_json(prompt, **kwargs):
+        sink = kwargs.get("usage")
+        if sink is not None:
+            sink.update({"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10})
+        return {"answer": "A", "coverage": "sufficient"}
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", fake_invoke_json)
+    results = orchestrator.answer_sub_questions(
+        {"sub_questions": [_sub(1, "a")]},
+        "问题",
+        _search([_knowledge_item(1, 1, 2)]),
+        lambda *a: {},
+    )
+    assert results[0]["usage"]["total_tokens"] == 10
+    assert results[0]["elapsed_ms"] is not None
+    assert results[0]["elapsed_ms"] >= 0
+
+
+def test_failed_sub_answer_still_records_elapsed(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("上游失败")
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", boom)
+    results = orchestrator.answer_sub_questions(
+        {"sub_questions": [_sub(1, "a")]},
+        "问题",
+        _search([_knowledge_item(1, 1, 2)]),
+        lambda *a: {},
+    )
+    assert results[0]["error"] == "上游失败"
+    assert results[0]["elapsed_ms"] is not None, "失败也要留下耗时，便于排查"
+
+
+def test_batch_timeout_marks_unfinished_sub_questions(monkeypatch):
+    """编排器用整轮剩余预算收紧本批等待上限时的行为。"""
+    import time as _time
+
+    def slow(*args, **kwargs):
+        _time.sleep(0.5)
+        return {"answer": "A", "coverage": "sufficient"}
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", slow)
+    results = orchestrator.answer_sub_questions(
+        {"sub_questions": [_sub(1, "a")]},
+        "问题",
+        _search([_knowledge_item(1, 1, 2)]),
+        lambda *a: {},
+        timeout=0.05,
+    )
+    assert results[0]["error"] == "子问题作答超时"
+
+
 def _round_one_result(key_entities):
     return {
         "id": 1,
@@ -188,17 +243,21 @@ def test_round_two_fills_placeholder_from_key_entities():
     assert plan["unresolved_pending"] == []
 
 
-def test_round_two_reports_pending_without_entities():
+def test_round_two_uses_intent_terms_when_entity_missing():
+    """拿不到中间实体时，用该子问题去掉占位符的意图词检索（不是整条原问题）。"""
     pending = _pending()
     plan = orchestrator.build_round_two_plan(
         [_round_one_result([])], [], pending=pending, limit=8
     )
-    assert plan["sub_questions"] == []
-    assert plan["unresolved_pending"] == pending
+    assert plan["unresolved_pending"] == []
+    assert (
+        plan["sub_questions"][0]["query"]
+        == "单体质量能量密度 25℃ 循环寿命"
+    )
 
 
-def test_round_two_falls_back_to_original_question():
-    """拿不到中间实体时，用用户原问题检索一次，而不是直接判缺失。"""
+def test_round_two_fallback_keeps_original_question_as_alt_query():
+    """意图词作主查询，原问题保留为备用查询（双查询交替取用）。"""
     plan = orchestrator.build_round_two_plan(
         [_round_one_result([])],
         [],
@@ -207,7 +266,11 @@ def test_round_two_falls_back_to_original_question():
         question="财务总监在年报里是以什么身份作出声明的？",
     )
     assert plan["unresolved_pending"] == []
-    assert plan["sub_questions"][0]["query"] == "财务总监在年报里是以什么身份作出声明的？"
+    assert plan["sub_questions"][0]["query"] == "单体质量能量密度 25℃ 循环寿命"
+    assert (
+        plan["sub_questions"][0]["alt_query"]
+        == "财务总监在年报里是以什么身份作出声明的？"
+    )
 
 
 def test_round_two_marks_alt_query_for_gap_fill():
@@ -215,6 +278,37 @@ def test_round_two_marks_alt_query_for_gap_fill():
         [_round_one_result(["SC-300"])], [1], limit=8, question="原问题"
     )
     assert plan["sub_questions"][0]["alt_query"] == "原问题"
+
+
+def test_round_two_adds_stripped_query_variant():
+    plan = orchestrator.build_round_two_plan(
+        [_round_one_result(["SC-300"])],
+        [],
+        pending=_pending(),
+        limit=8,
+        question="原问题",
+    )
+    assert plan["sub_questions"][0]["stripped_query"] == "单体质量能量密度 25℃ 循环寿命"
+
+
+def test_collect_evidence_searches_all_query_variants():
+    searched: list[str] = []
+
+    def search(query):
+        searched.append(query)
+        index = len(searched)
+        return {
+            "status": "ok",
+            "items": [_knowledge_item(index, index * 10, index * 10 + 2)],
+        }
+
+    sub_question = _sub(1, "实体式查询")
+    sub_question["alt_query"] = "原问题"
+    sub_question["stripped_query"] = "意图词"
+    evidence = orchestrator.collect_evidence([sub_question], search, lambda *a: {})
+
+    assert searched == ["实体式查询", "原问题", "意图词"]
+    assert len(evidence[1]["items"]) == Config.AGENT_EVIDENCE_PER_SUB
 
 
 def test_collect_evidence_merges_alt_query_without_duplicates():
@@ -247,3 +341,73 @@ def test_round_two_keeps_distinct_entity_queries():
     result = _round_one_result(["SC-300", "SC-400"])
     plan = orchestrator.build_round_two_plan([result], [1], pending=None, limit=8)
     assert [item["query"] for item in plan["sub_questions"]] == ["SC-300", "SC-400"]
+
+
+def test_round_two_marks_chain_and_gap_pools():
+    """链式延伸进链式池，缺口补充进缺口池——两者额度独立。"""
+    dependency = _round_one_result(["SC-300"])  # id=1，供链式待定项使用
+    unresolved = _round_one_result(["SC-400"])  # id=2，覆盖不足 → 缺口补查
+    unresolved["id"] = 2
+    unresolved["coverage"] = "partial"
+    plan = orchestrator.build_round_two_plan(
+        [dependency, unresolved], [2], pending=_pending(), limit=8, question="原问题"
+    )
+    pools = [item["pool"] for item in plan["sub_questions"]]
+    assert pools == ["chain", "gap"]
+
+
+def test_pools_do_not_compete_for_budget(monkeypatch):
+    """缺口池用尽后，链式池仍能拿到自己的额度。"""
+    monkeypatch.setattr(Config, "AGENT_CHAIN_EVIDENCE_BUDGET", 2)
+    monkeypatch.setattr(Config, "AGENT_GAP_EVIDENCE_BUDGET", 1)
+    monkeypatch.setattr(Config, "AGENT_EVIDENCE_PER_SUB", 3)
+    items = [_knowledge_item(index, index * 10, index * 10 + 2) for index in range(1, 7)]
+    search = _search(items)
+
+    gaps = [_sub(index, f"gap{index}", source="knowledge") for index in range(1, 3)]
+    for item in gaps:
+        item["pool"] = orchestrator.POOL_GAP
+    chains = [_sub(9, "chain", source="knowledge")]
+    chains[0]["pool"] = orchestrator.POOL_CHAIN
+
+    state = orchestrator.new_evidence_state()
+    per_sub = orchestrator.collect_evidence(gaps + chains, search, lambda *a: {}, state)
+
+    gap_total = sum(len(per_sub[item["id"]]["items"]) for item in gaps)
+    assert gap_total == 1, "缺口池只应拿 1 条"
+    assert len(per_sub[9]["items"]) == 2, "链式池不受缺口池影响"
+    assert state["chain"] == 2 and state["gap"] == 1
+
+
+def test_chain_budget_scales_with_sub_question_count(monkeypatch):
+    """链式池按需求动态计算：规划器多拆子问题不会再饿死排在后面的链式义务。"""
+    monkeypatch.setattr(Config, "AGENT_EVIDENCE_PER_SUB", 3)
+    monkeypatch.setattr(Config, "AGENT_CHAIN_EVIDENCE_BUDGET", 15)
+    items = [
+        {"source": "knowledge", "pool": orchestrator.POOL_CHAIN} for _ in range(4)
+    ]
+    assert orchestrator._effective_limits(items)["chain"] == 12
+
+    # 安全阀仍然生效：子问题再多也不超过上限
+    many = [
+        {"source": "knowledge", "pool": orchestrator.POOL_CHAIN} for _ in range(9)
+    ]
+    assert orchestrator._effective_limits(many)["chain"] == 15
+
+
+def test_pending_intent_duplicates_are_skipped():
+    """意图相同的重复待定子问题只保留第一个，不再白占链式池额度。"""
+    first = _pending()[0]
+    second = dict(first, id=3, depends_on=2)
+    dependency = _round_one_result(["SC-300"])
+    other = _round_one_result(["SC-400"])
+    other["id"] = 2
+    plan = orchestrator.build_round_two_plan(
+        [dependency, other],
+        [],
+        pending=[first, second],
+        limit=8,
+        question="原问题",
+    )
+    assert len(plan["sub_questions"]) == 1
+    assert plan["sub_questions"][0]["query"].startswith("SC-300")

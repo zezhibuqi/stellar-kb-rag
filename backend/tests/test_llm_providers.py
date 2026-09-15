@@ -155,3 +155,94 @@ def test_stream_uses_active_provider_model(monkeypatch, scnet_key):
     assert tokens == ["token"]
     assert calls[0]["model"] == "GLM-5-Base"
     assert calls[0]["stream"] is True
+
+
+# ── token 用量采集（trace 用，设计文档 7.8）──────────────────────────────
+
+
+def _usage_client(calls: list, reply: str = '{"a": 1}', usage=None):
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=reply))],
+            usage=usage,
+        )
+
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+def test_invoke_json_records_token_usage(monkeypatch):
+    calls: list = []
+    usage = SimpleNamespace(prompt_tokens=11, completion_tokens=2, total_tokens=13)
+    monkeypatch.setattr(
+        llm, "get_client", lambda provider=None: _usage_client(calls, usage=usage)
+    )
+    sink: dict = {}
+    assert llm.invoke_json('输出 {"a": 1}', usage=sink) == {"a": 1}
+    assert sink == {"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}
+
+
+def test_invoke_json_without_usage_sink_still_works(monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(llm, "get_client", lambda provider=None: _usage_client(calls))
+    assert llm.invoke_json('输出 {"a": 1}') == {"a": 1}
+
+
+def test_stream_requests_and_records_usage(monkeypatch):
+    calls: list = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        chunk = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="token"), finish_reason=None
+                )
+            ],
+            usage=None,
+        )
+        final = SimpleNamespace(
+            choices=[],
+            usage=SimpleNamespace(prompt_tokens=5, completion_tokens=1, total_tokens=6),
+        )
+        return iter([chunk, final])
+
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(llm, "get_client", lambda provider=None: fake)
+    sink: dict = {}
+    assert list(llm.stream("hi", usage=sink)) == ["token"]
+    assert calls[0]["stream_options"] == {"include_usage": True}
+    assert sink == {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6}
+
+
+def test_stream_retries_without_stream_options_when_unsupported(monkeypatch):
+    """端点不认 stream_options 时退回普通流式：用量留空，但回答照常产出。"""
+    calls: list = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        if "stream_options" in kwargs:
+            raise TypeError("unexpected keyword argument 'stream_options'")
+        chunk = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content="token"), finish_reason=None
+                )
+            ],
+            usage=None,
+        )
+        return iter([chunk])
+
+    fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr(llm, "get_client", lambda provider=None: fake)
+    sink: dict = {}
+    assert list(llm.stream("hi", usage=sink)) == ["token"]
+    assert len(calls) == 2
+    assert "stream_options" not in calls[1]
+    assert sink == {}
+
+
+def test_scnet_disables_stream_usage(scnet_key):
+    """GLM-5-Base 端点已知不兼容项多，流式用量显式关闭而不是试错。"""
+    assert llm.PROVIDERS["scnet-glm5base"].supports_stream_usage is False
+    assert llm.PROVIDERS["deepseek-v4f"].supports_stream_usage is True

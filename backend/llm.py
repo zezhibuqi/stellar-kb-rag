@@ -32,6 +32,9 @@ class ModelProvider:
     # scnet GLM-5-Base 上 response_format=json_object 会返回乱序文本（finish=abort），
     # 不支持的能力需在注册表中显式关闭
     supports_response_format: bool = True
+    # 流式调用是否接受 stream_options.include_usage（trace 里 token 用量的来源）；
+    # 端点不支持时注册为 False，该步用量留空，而不是让流式调用失败
+    supports_stream_usage: bool = True
     # 增强模式（编排式问答）需要可靠的结构化输出与低延迟；不具备该标志的提供方
     # 在增强模式下不可选中，系统不会为了跑通而在背后换模型（ADR 0008）
     agent_capable: bool = False
@@ -61,6 +64,7 @@ def _build_providers() -> dict[str, ModelProvider]:
             api_key=Config.SCNET_API_KEY,
             router_max_tokens=2000,
             supports_response_format=False,
+            supports_stream_usage=False,
         ),
         ModelProvider(
             id="siliconflow-dsv4f",
@@ -158,15 +162,48 @@ def test_provider(provider: ModelProvider) -> str:
     return response.choices[0].message.content or ""
 
 
-def invoke(prompt: str, temperature: float | None = None) -> str:
+def _usage_payload(response) -> dict:
+    """提取一次调用的 token 用量；端点不返回 usage 时给空字典。"""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    if isinstance(usage, dict):
+        return {
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+            "total_tokens": usage.get("total_tokens"),
+        }
+    return {
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "total_tokens": getattr(usage, "total_tokens", None),
+    }
+
+
+def _record_usage(target: dict | None, response) -> None:
+    """把用量写进调用方提供的字典（trace 用）；拿不到用量时保持原样。"""
+    if target is None:
+        return
+    payload = _usage_payload(response)
+    if not payload:
+        return
+    target.clear()
+    target.update(payload)
+
+
+def invoke(
+    prompt: str, temperature: float | None = None, max_tokens: int | None = None
+) -> str:
     if temperature is None:
         temperature = Config.LLM_TEMPERATURE
+    if max_tokens is None:
+        max_tokens = Config.LLM_MAX_TOKENS
     provider = get_active_provider()
     response = get_client(provider).chat.completions.create(
         model=provider.model,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
-        max_tokens=Config.LLM_MAX_TOKENS,
+        max_tokens=max_tokens,
     )
     content = response.choices[0].message.content
     if not content:
@@ -174,8 +211,16 @@ def invoke(prompt: str, temperature: float | None = None) -> str:
     return content
 
 
-def invoke_json(prompt: str, temperature: float = 0.0, max_tokens: int | None = None) -> dict:
-    """JSON 输出调用封装（意图路由用）；兼容不支持 response_format 的提供方。"""
+def invoke_json(
+    prompt: str,
+    temperature: float = 0.0,
+    max_tokens: int | None = None,
+    usage: dict | None = None,
+) -> dict:
+    """JSON 输出调用封装（意图路由/规划/子答案用）；兼容不支持 response_format 的提供方。
+
+    usage：可选字典，调用方传入后由本函数填入本次调用的 token 用量（供 trace 记录）。
+    """
     provider = get_active_provider()
     if max_tokens is None:
         max_tokens = provider.router_max_tokens
@@ -194,6 +239,7 @@ def invoke_json(prompt: str, temperature: float = 0.0, max_tokens: int | None = 
             response = get_client(provider).chat.completions.create(**common)
     else:
         response = get_client(provider).chat.completions.create(**common)
+    _record_usage(usage, response)
     content = response.choices[0].message.content
     if not content:
         raise RuntimeError("模型未返回 JSON 内容（推理可能耗尽 max_tokens）")
@@ -212,20 +258,41 @@ def _parse_json_text(text: str) -> dict:
     return json.loads(text)
 
 
-def stream(prompt: str, temperature: float | None = None):
+def stream(
+    prompt: str,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    usage: dict | None = None,
+):
+    """流式生成；传入 usage 字典时尽力采集 token 用量（端点不支持则留空）。"""
     if temperature is None:
         temperature = Config.LLM_TEMPERATURE
+    if max_tokens is None:
+        max_tokens = Config.LLM_MAX_TOKENS
     provider = get_active_provider()
-    response = get_client(provider).chat.completions.create(
-        model=provider.model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=Config.LLM_MAX_TOKENS,
-        stream=True,
-    )
+    request = {
+        "model": provider.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+        **(
+            {"stream_options": {"include_usage": True}}
+            if usage is not None and provider.supports_stream_usage
+            else {}
+        ),
+    }
+    try:
+        response = get_client(provider).chat.completions.create(**request)
+    except Exception:  # noqa: BLE001 - 端点不认识 stream_options 时退回普通流式
+        if "stream_options" not in request:
+            raise
+        request.pop("stream_options")
+        response = get_client(provider).chat.completions.create(**request)
     emitted = False
     finish_reason = None
     for chunk in response:
+        _record_usage(usage, chunk)
         if chunk.choices:
             choice = chunk.choices[0]
             if choice.finish_reason:

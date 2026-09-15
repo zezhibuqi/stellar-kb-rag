@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS documents (
     uploaded_by INTEGER REFERENCES users(id),
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status TEXT DEFAULT 'pending',
-    error_message TEXT
+    error_message TEXT,
+    keyword_indexed_at TIMESTAMP   -- 关键词索引写入时间（ADR 0010），未入索引为 NULL
 );
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -92,6 +93,21 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+
+-- 关键词通道索引（ADR 0010）：FTS5 + trigram 分词器，支持中文子串匹配；
+-- 短于 3 字的查询词与 MATCH 零命中的情况由 LIKE 兜底，不落在这张表上。
+CREATE VIRTUAL TABLE IF NOT EXISTS chunk_index USING fts5(
+    content,
+    doc_id UNINDEXED,
+    chunk_id UNINDEXED,
+    domain UNINDEXED,
+    filename UNINDEXED,
+    start_line UNINDEXED,
+    parent_type UNINDEXED,
+    parent_start_line UNINDEXED,
+    parent_end_line UNINDEXED,
+    tokenize=trigram
+);
 """
 
 ROLE_VALUES = ("employee", "finance", "sales", "aftersale", "admin")
@@ -204,6 +220,8 @@ def _migrate() -> None:
     }
     if "source_content" not in document_columns:
         conn.execute("ALTER TABLE documents ADD COLUMN source_content TEXT")
+    if "keyword_indexed_at" not in document_columns:
+        conn.execute("ALTER TABLE documents ADD COLUMN keyword_indexed_at TIMESTAMP")
     user_columns = {
         row["name"]
         for row in conn.execute("PRAGMA table_info(users)").fetchall()

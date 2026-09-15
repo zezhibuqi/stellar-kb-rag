@@ -59,6 +59,7 @@ def test_schema_tables_and_columns():
             "uploaded_at",
             "status",
             "error_message",
+            "keyword_indexed_at",
         },
     }
     for table, columns in expected.items():

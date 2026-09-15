@@ -64,9 +64,31 @@ class Config:
 
     # 增强模式（编排式问答）
     AGENT_MAX_SUB_QUESTIONS = int(os.getenv("AGENT_MAX_SUB_QUESTIONS", "8"))
-    AGENT_EVIDENCE_PER_SUB = int(os.getenv("AGENT_EVIDENCE_PER_SUB", "2"))
+    AGENT_EVIDENCE_PER_SUB = int(os.getenv("AGENT_EVIDENCE_PER_SUB", "3"))
     AGENT_EVIDENCE_GLOBAL = int(os.getenv("AGENT_EVIDENCE_GLOBAL", "10"))
-    AGENT_SEARCH_CANDIDATES = int(os.getenv("AGENT_SEARCH_CANDIDATES", "3"))
+    AGENT_SEARCH_CANDIDATES = int(os.getenv("AGENT_SEARCH_CANDIDATES", "5"))
+    # 重排后保留的候选数：实测目标块可能排在密集召回的 8~10 名，
+    # 留太窄会在重排阶段被挤掉（它是候选生成之后、注入之前的最后一道闸）
+    AGENT_RERANK_TOP_N = int(os.getenv("AGENT_RERANK_TOP_N", "12"))
+    # 增强模式的向量召回条数：比标准模式大，缓解超大文档（如 600KB 年报
+    # 切出 500+ 块）里具体句子挤不进候选集的问题；重排仍只取少量候选。
+    AGENT_RETRIEVE_K = int(os.getenv("AGENT_RETRIEVE_K", "30"))
+    # 关键词通道（ADR 0010）：两路各自召回后按 RRF 融合
+    AGENT_KEYWORD_TOP_K = int(os.getenv("AGENT_KEYWORD_TOP_K", "80"))
+    AGENT_FUSION_TOP_N = int(os.getenv("AGENT_FUSION_TOP_N", "30"))
+    AGENT_LIKE_TOP_K = int(os.getenv("AGENT_LIKE_TOP_K", "20"))
+    # RRF 融合常数：只用两路的名次，不比较各自的分值
+    AGENT_RRF_K = int(os.getenv("AGENT_RRF_K", "60"))
+    # 工具返回的候选里为「关键词字面命中」保留的席位数：实测释义表这类
+    # 字面精确但语义分低的块会被重排整体淘汰，需要席位保护
+    AGENT_KEYWORD_RESERVED = int(os.getenv("AGENT_KEYWORD_RESERVED", "2"))
+    # 第二轮的两个独立预算池（ADR 0010）：链式义务不该被机会主义的补查抢占。
+    # 链式池按需求动态计算（每子问题配额 × 链式子问题数），这里的值是**安全阀**：
+    # 规划器拆出的子问题数量是可变的，固定池必然在某些轮次饿死链式义务。
+    AGENT_CHAIN_EVIDENCE_BUDGET = int(
+        os.getenv("AGENT_CHAIN_EVIDENCE_BUDGET", "15")
+    )
+    AGENT_GAP_EVIDENCE_BUDGET = int(os.getenv("AGENT_GAP_EVIDENCE_BUDGET", "4"))
     AGENT_SUB_TIMEOUT = int(os.getenv("AGENT_SUB_TIMEOUT", "60"))
     AGENT_TOTAL_BUDGET = int(os.getenv("AGENT_TOTAL_BUDGET", "120"))
     # 调用 token 预算：思考型模型会先花掉大量预算再输出 JSON。
@@ -75,6 +97,11 @@ class Config:
     AGENT_PLAN_MAX_TOKENS = int(os.getenv("AGENT_PLAN_MAX_TOKENS", "10000"))
     AGENT_SUB_ANSWER_MAX_TOKENS = int(
         os.getenv("AGENT_SUB_ANSWER_MAX_TOKENS", "6000")
+    )
+    # 合成调用的 token 预算：增强模式的合成提示词包含多个子问题的证据，
+    # 比标准模式长得多，沿用 LLM_MAX_TOKENS(4096) 会被推理耗尽、返回空内容
+    AGENT_SYNTHESIS_MAX_TOKENS = int(
+        os.getenv("AGENT_SYNTHESIS_MAX_TOKENS", "8000")
     )
 
     # 上传限制

@@ -1,12 +1,15 @@
 """增强模式编排（设计文档 7.8）。
 
-本模块当前实现**规划步**：一次 LLM 调用产出「是否需要拆解 + 意图 + 结构化过滤条件
-+ 子问题列表」，解析失败重试一次，仍失败则打回退标记，由上层退回标准模式单跳。
-子答案并行、有界第二轮、逐项合成在后续提交中补齐。
+链路：规划（一次 LLM 调用）→ 第一轮子问题并行检索作答 → 有界第二轮（链式池 +
+缺口池）→ 逐项合成流式输出。规划连续两次解析失败、整轮时间预算耗尽、全部子问题
+作答失败、合成未吐字即失败，四种情况都退回标准模式单跳并显式说明；全部子问题被
+订单工具拒绝时不调用 LLM，直接返回固定话术。
 """
 
 import logging
 import json
+import re
+import time
 from concurrent.futures import ThreadPoolExecutor, wait
 
 import agent_tools
@@ -25,6 +28,10 @@ SOURCES = (SOURCE_KNOWLEDGE, SOURCE_ORDER)
 
 INTENTS = ("order", "knowledge", "mixed")
 PLANNER_FALLBACK_PREFIX = "未能完成问题拆解，按标准模式回答。"
+# 以下三种回退都不静默：先以 token 形式说明原因，再输出标准模式单跳的回答
+SUB_ANSWER_FALLBACK_PREFIX = "子问题作答全部失败，按标准模式回答。"
+SYNTHESIS_FALLBACK_PREFIX = "回答合成失败，按标准模式回答。"
+BUDGET_FALLBACK_PREFIX = "增强模式超出整轮时间预算，按标准模式回答。"
 
 # 子问题证据覆盖状态
 COVERAGE_SUFFICIENT = "sufficient"
@@ -174,9 +181,14 @@ def _normalize(data: dict) -> dict:
 def plan_question(question: str, history: list | None = None) -> dict:
     """规划一次；解析失败重试一次，仍失败返回 fallback 标记。"""
     prompt = build_plan_prompt(question, history)
+    usage: dict = {}
     for attempt in range(2):
         try:
-            return _normalize(llm.invoke_json(prompt, max_tokens=PLAN_MAX_TOKENS))
+            plan = _normalize(
+                llm.invoke_json(prompt, max_tokens=PLAN_MAX_TOKENS, usage=usage)
+            )
+            plan["usage"] = usage
+            return plan
         except Exception as exc:  # noqa: BLE001 - 规划失败需回退而非中断
             logger.warning("规划解析失败（第 %s 次）：%s", attempt + 1, exc)
     return {
@@ -187,6 +199,7 @@ def plan_question(question: str, history: list | None = None) -> dict:
         "sub_questions": [],
         "truncated": 0,
         "fallback": True,
+        "usage": usage,
     }
 
 
@@ -224,18 +237,97 @@ def _format_knowledge_evidence(items: list[dict]) -> str:
 
 
 def new_evidence_state() -> dict:
-    """跨轮共享的证据预算：全局计数与已占用的证据单元。"""
-    return {"seen": set(), "total": 0}
+    """跨轮共享的状态：去重集合全局唯一，计数按预算池分开（ADR 0010）。"""
+    return {"seen": set(), "round1": 0, "chain": 0, "gap": 0}
+
+
+# 证据预算池：第一轮、链式延伸、缺口补充各自独立计数，互不借用
+POOL_ROUND_ONE = "round1"
+POOL_CHAIN = "chain"
+POOL_GAP = "gap"
+
+
+def _pool_limit(pool: str, state: dict | None = None) -> int:
+    if state is not None and pool in state.get("limits", {}):
+        return state["limits"][pool]
+    if pool == POOL_CHAIN:
+        return Config.AGENT_CHAIN_EVIDENCE_BUDGET
+    if pool == POOL_GAP:
+        return Config.AGENT_GAP_EVIDENCE_BUDGET
+    return Config.AGENT_EVIDENCE_GLOBAL
+
+
+def _effective_limits(sub_questions: list[dict]) -> dict:
+    """池额度：链式池按需求动态计算——每个链式子问题都要拿到完整配额，
+    否则规划器多拆一个子问题就会把排在后面的链式义务饿死；安全阀负责封顶，
+    避免子问题很多时把提示词撑爆。缺口池保持固定（它是机会性补查）。"""
+    knowledge_items = [item for item in sub_questions if item["source"] != SOURCE_ORDER]
+    chain_count = sum(
+        1 for item in knowledge_items if item.get("pool") == POOL_CHAIN
+    )
+    chain_limit = min(
+        Config.AGENT_EVIDENCE_PER_SUB * max(1, chain_count),
+        Config.AGENT_CHAIN_EVIDENCE_BUDGET,
+    )
+    limits = {
+        POOL_ROUND_ONE: Config.AGENT_EVIDENCE_GLOBAL,
+        POOL_GAP: Config.AGENT_GAP_EVIDENCE_BUDGET,
+    }
+    if chain_count:
+        # 只在真的存在链式项时写入，避免被后续批次覆盖成 0 项对应的额度
+        limits[POOL_CHAIN] = chain_limit
+    return limits
+
+
+def _interleave(
+    pools: list[list[dict]], per_limit: int, state: dict, pool: str
+) -> list[dict]:
+    """按查询变体轮转取用，受每子问题配额与本池额度双重约束。"""
+    items: list[dict] = []
+    limit = _pool_limit(pool, state)
+    while len(items) < per_limit and state[pool] < limit and any(pools):
+        progressed = False
+        for candidates in pools:
+            if len(items) >= per_limit or state[pool] >= limit:
+                break
+            while candidates:
+                candidate = candidates.pop(0)
+                key = chroma_store.evidence_unit_key(
+                    candidate.get("doc_id"),
+                    candidate.get("parent_start_line"),
+                    candidate.get("parent_end_line"),
+                    candidate.get("chunk_id"),
+                )
+                if key in state["seen"]:
+                    continue
+                state["seen"].add(key)
+                state[pool] += 1
+                items.append(candidate)
+                progressed = True
+                break
+        if not progressed:
+            break
+    return items
 
 
 def collect_evidence(
     sub_questions: list[dict], search_tool, order_tool, state: dict | None = None
 ) -> dict:
-    """按每子问题配额与全局上限裁决证据，跨子问题按证据单元去重。"""
+    """按每子问题配额与池额度裁决证据，跨子问题按证据单元去重。
+
+    额度按「剩余额度 / 剩余子问题数」公平分配，而不是让前面的子问题先吃满自己的
+    配额——否则池额度偏紧时，排在后面的子问题（往往正是链式义务）一条也拿不到。
+    """
     state = state if state is not None else new_evidence_state()
+    state.setdefault("limits", {}).update(_effective_limits(sub_questions))
     per_sub: dict[int, dict] = {}
     per_limit = Config.AGENT_EVIDENCE_PER_SUB
     global_limit = Config.AGENT_EVIDENCE_GLOBAL
+
+    knowledge_count = sum(
+        1 for item in sub_questions if item["source"] != SOURCE_ORDER
+    )
+    processed_knowledge = 0
 
     for sub_question in sub_questions:
         if sub_question["source"] == SOURCE_ORDER:
@@ -245,49 +337,49 @@ def collect_evidence(
                     sub_question.get("filters") or {}, sub_question.get("aggregation")
                 ),
                 "items": [],
+                "variants": [],
+                "pool": sub_question.get("pool", POOL_ROUND_ONE),
             }
             continue
 
         # 第二轮的子问题可能带备用查询（通常是用户原问题）：规划器写占位查询时
         # 还不知道实体，措辞容易偏离原文，两个查询交替取用可兼顾精确与召回。
-        queries = [sub_question["query"]]
-        if sub_question.get("alt_query"):
-            queries.append(sub_question["alt_query"])
+        queries = [("primary", sub_question["query"])]
+        for extra in (
+            sub_question.get("alt_query"),
+            sub_question.get("stripped_query"),
+        ):
+            if extra and _normalize_query(extra) not in {
+                _normalize_query(item[1]) for item in queries
+            }:
+                queries.append(("alt_question" if extra == sub_question.get("alt_query") else "intent_terms", extra))
 
         first_result: dict = {"status": agent_tools.STATUS_EMPTY, "items": []}
         pools: list[list[dict]] = []
-        for position, query in enumerate(queries):
+        variant_metrics: list[dict] = []
+        for position, (kind, query) in enumerate(queries):
             result = search_tool(query)
             if position == 0:
                 first_result = result
             pools.append(list(result.get("items") or []))
+            variant_metrics.append(
+                {"kind": kind, "query": query, **(result.get("retrieval") or {})}
+            )
 
-        items: list[dict] = []
-        while len(items) < per_limit and any(pools):
-            progressed = False
-            for pool in pools:
-                if len(items) >= per_limit or state["total"] >= global_limit:
-                    break
-                while pool:
-                    candidate = pool.pop(0)
-                    key = chroma_store.evidence_unit_key(
-                        candidate.get("doc_id"),
-                        candidate.get("parent_start_line"),
-                        candidate.get("parent_end_line"),
-                    )
-                    if key in state["seen"]:
-                        continue
-                    state["seen"].add(key)
-                    state["total"] += 1
-                    items.append(candidate)
-                    progressed = True
-                    break
-            if not progressed:
-                break
+        pool = sub_question.get("pool", POOL_ROUND_ONE)
+        processed_knowledge += 1
+        remaining_items = max(1, knowledge_count - processed_knowledge + 1)
+        budget_left = max(0, _pool_limit(pool, state) - state[pool])
+        allowance = max(
+            1, min(per_limit, -(-budget_left // remaining_items))
+        )
+        items = _interleave(pools, allowance, state, pool)
         per_sub[sub_question["id"]] = {
             "kind": SOURCE_KNOWLEDGE,
             "result": first_result,
             "items": items,
+            "variants": variant_metrics,
+            "pool": pool,
         }
 
     return per_sub
@@ -298,13 +390,17 @@ def _base_result(sub_question: dict) -> dict:
         "id": sub_question["id"],
         "query": sub_question["query"],
         "source": sub_question["source"],
+        "pool": sub_question.get("pool", POOL_ROUND_ONE),
         "answer": "",
         "coverage": COVERAGE_MISSING,
         "evidence_ids": [],
         "key_entities": [],
         "evidence": [],
+        "retrieval": [],
         "order": None,
         "error": None,
+        "elapsed_ms": None,
+        "usage": {},
     }
 
 
@@ -338,38 +434,58 @@ def answer_sub_questions(
     order_tool,
     history: list | None = None,
     state: dict | None = None,
+    timeout: float | None = None,
 ) -> list[dict]:
-    """并行取得每个子问题的子答案；单个子问题失败不影响其他子问题。"""
+    """并行取得每个子问题的子答案；单个子问题失败不影响其他子问题。
+
+    timeout：本批等待上限（秒），默认 `AGENT_SUB_TIMEOUT`；编排器会用整轮剩余
+    预算进一步收紧，避免一批等待吃掉整个循环的时间预算。
+    """
     sub_questions = plan.get("sub_questions") or []
     if not sub_questions:
         return []
 
     evidence_map = collect_evidence(sub_questions, search_tool, order_tool, state)
     results = [_base_result(sub_question) for sub_question in sub_questions]
+    wait_timeout = Config.AGENT_SUB_TIMEOUT if timeout is None else max(0.0, timeout)
 
     def run(index: int) -> dict:
-        sub_question = sub_questions[index]
-        evidence = evidence_map[sub_question["id"]]
-        result = _base_result(sub_question)
-        result["evidence"] = evidence["items"]
-        if evidence["kind"] == SOURCE_ORDER:
-            order_result = evidence["result"]
-            result["order"] = order_result
-            if order_result.get("status") == "denied":
-                return result
-            evidence_text = order_qa.format_order_context(order_result)
-        else:
-            evidence_text = _format_knowledge_evidence(evidence["items"])
-            if not evidence["items"]:
-                return result
+        started = time.monotonic()
+        result = _base_result(sub_questions[index])
+        try:
+            sub_question = sub_questions[index]
+            evidence = evidence_map[sub_question["id"]]
+            result["evidence"] = evidence["items"]
+            result["retrieval"] = evidence.get("variants") or []
+            if evidence["kind"] == SOURCE_ORDER:
+                order_result = evidence["result"]
+                result["order"] = order_result
+                if order_result.get("status") == "denied":
+                    return result
+                evidence_text = order_qa.format_order_context(order_result)
+            else:
+                evidence_text = _format_knowledge_evidence(evidence["items"])
+                if not evidence["items"]:
+                    return result
 
-        prompt = build_sub_answer_prompt(question, sub_question, evidence_text)
-        result.update(
-            _normalize_sub_answer(
-                llm.invoke_json(prompt, max_tokens=SUB_ANSWER_MAX_TOKENS)
+            prompt = build_sub_answer_prompt(question, sub_question, evidence_text)
+            usage: dict = {}
+            result.update(
+                _normalize_sub_answer(
+                    llm.invoke_json(
+                        prompt, max_tokens=SUB_ANSWER_MAX_TOKENS, usage=usage
+                    )
+                )
             )
-        )
-        return result
+            result["usage"] = usage
+            return result
+        except Exception as exc:  # noqa: BLE001 - 单个子问题失败不阻塞其他
+            logger.warning("子问题 %s 作答失败：%s", index + 1, exc)
+            result["error"] = str(exc)
+            return result
+        finally:
+            # 失败也要留下耗时：排查「时好时坏」时先看这里
+            result["elapsed_ms"] = int((time.monotonic() - started) * 1000)
 
     with ThreadPoolExecutor(
         max_workers=max(1, min(len(sub_questions), Config.AGENT_MAX_SUB_QUESTIONS)),
@@ -378,7 +494,7 @@ def answer_sub_questions(
         futures = {
             executor.submit(run, index): index for index in range(len(sub_questions))
         }
-        done, not_done = wait(futures.keys(), timeout=Config.AGENT_SUB_TIMEOUT)
+        done, not_done = wait(futures.keys(), timeout=wait_timeout)
         for future in done:
             index = futures[future]
             try:
@@ -471,6 +587,16 @@ def _fill_placeholder(query: str, dependency_id, entity: str) -> str:
     return f"{entity} {query}"
 
 
+def _strip_placeholders(query: str) -> str:
+    """去掉占位符，只保留意图词。
+
+    规划器写占位查询时还不知道实体，替换后可能把实体变成噪声——例如
+    「{1} 年报释义 正式全称」替换成「SC-300 年报释义 正式全称」，而年报的
+    释义表里根本没有「SC-300」这个词。留一个不带实体的变体作为第三种查询。
+    """
+    return " ".join(re.sub(r"\{\s*\d+\s*\}", " ", query or "").split())
+
+
 def _normalize_query(query: str) -> str:
     return " ".join((query or "").split()).lower()
 
@@ -508,11 +634,17 @@ def build_round_two_plan(
     sub_questions: list[dict] = []
     unresolved_pending: list[dict] = []
     added_queries: list[str] = []
+    seen_intents: set = set()
     offset = len(sub_results)
     results_by_id = {item["id"]: item for item in sub_results}
     fallback_used = False
 
-    def add(query: str, follow_up_of, alt_query: str | None = None) -> None:
+    def add(
+        query: str,
+        follow_up_of,
+        alt_query: str | None = None,
+        pool: str = POOL_GAP,
+    ) -> None:
         added_queries.append(_normalize_query(query))
         sub_questions.append(
             {
@@ -523,17 +655,36 @@ def build_round_two_plan(
                 "aggregation": None,
                 "follow_up_of": follow_up_of,
                 "alt_query": alt_query,
+                "pool": pool,
             }
         )
 
     for item in pending or []:
+        intent_key = _normalize_query(_strip_placeholders(item["query"]))
+        if intent_key and intent_key in seen_intents:
+            # 同一意图的重复待定项（例如「SC-500 年报释义 正式全称」与
+            # 「SC-300 年报释义 正式全称」）只保留第一个，避免无谓占用链式池
+            logger.info("待定子问题意图重复，跳过：%s", item["query"])
+            continue
+        if intent_key:
+            seen_intents.add(intent_key)
         dependency = results_by_id.get(item.get("depends_on"))
         entities = dependency["key_entities"] if dependency else []
         if not entities:
-            # 拿不到中间实体：退回用原问题检索一次（整问的措辞往往能命中）
-            if question and not fallback_used and not _is_redundant(question, added_queries):
+            # 拿不到中间实体：优先用该子问题**去掉占位符的意图词**检索
+            # （它比整条原问题更贴近文档用词），实在没有再退回原问题
+            intent_terms = _strip_placeholders(item["query"])
+            fallback_query = intent_terms or question or ""
+            if fallback_query and not fallback_used and not _is_redundant(
+                fallback_query, added_queries
+            ):
                 fallback_used = True
-                add(question, item.get("depends_on"))
+                add(
+                    fallback_query,
+                    item.get("depends_on"),
+                    alt_query=question,
+                    pool=POOL_CHAIN,
+                )
             else:
                 unresolved_pending.append(item)
             continue
@@ -545,7 +696,9 @@ def build_round_two_plan(
                 _fill_placeholder(item["query"], item.get("depends_on"), entity),
                 item.get("depends_on"),
                 alt_query=question,
+                pool=POOL_CHAIN,
             )
+            sub_questions[-1]["stripped_query"] = _strip_placeholders(item["query"])
 
     for item in sub_results:
         if item["id"] not in unresolved_ids:
@@ -592,28 +745,96 @@ def collect_sources(sub_results: list[dict]) -> list[dict]:
     return sources
 
 
+def _model_info() -> dict:
+    """当前模型标识（trace 用）；取不到时留空，不影响回答。"""
+    try:
+        provider = llm.get_active_provider()
+    except Exception:  # noqa: BLE001 - trace 记录不得影响问答
+        return {}
+    return {
+        "id": getattr(provider, "id", None),
+        "model": getattr(provider, "model", None),
+    }
+
+
+def _budget_snapshot(state: dict | None) -> dict:
+    """证据预算池用量（trace 用）。"""
+    state = state or {}
+    return {
+        "round1": state.get("round1", 0),
+        "chain": state.get("chain", 0),
+        "gap": state.get("gap", 0),
+        "round1_limit": Config.AGENT_EVIDENCE_GLOBAL,
+        "chain_limit": (state.get("limits") or {}).get(
+            POOL_CHAIN, Config.AGENT_CHAIN_EVIDENCE_BUDGET
+        ),
+        "gap_limit": Config.AGENT_GAP_EVIDENCE_BUDGET,
+    }
+
+
+def _timing_extra(
+    started: float,
+    plan_ms: int | None,
+    usage: dict,
+    round_two_ms: int | None = None,
+    synthesis_ms: int | None = None,
+    budget_exhausted: bool = False,
+) -> dict:
+    """trace 的模型、每步耗时、token 用量三块（设计文档 7.8 的 trace 要求）。"""
+    return {
+        "model": _model_info(),
+        "timings": {
+            "plan_ms": plan_ms,
+            "round_two_ms": round_two_ms,
+            "synthesis_ms": synthesis_ms,
+            "total_ms": int((time.monotonic() - started) * 1000),
+            "total_budget_s": Config.AGENT_TOTAL_BUDGET,
+        },
+        "usage": usage,
+        "budget_exhausted": budget_exhausted,
+    }
+
+
+def _all_order_denied(results: list[dict]) -> bool:
+    """全部子问题都被订单工具拒绝时为真：此时不得再调用 LLM。"""
+    return bool(results) and all(
+        item["source"] == SOURCE_ORDER
+        and (item.get("order") or {}).get("status") == "denied"
+        for item in results
+    )
+
+
 def build_trace(
     plan: dict,
     sub_results: list[dict],
     round_two_count: int = 0,
     single_hop: bool = False,
     fallback: bool = False,
+    budgets: dict | None = None,
+    fallback_reason: str | None = None,
+    extra: dict | None = None,
 ) -> dict:
-    return {
+    trace = {
         "single_hop": single_hop,
         "fallback": fallback,
+        "fallback_reason": fallback_reason,
         "truncated_sub_questions": plan.get("truncated", 0),
         "rounds": 2 if round_two_count else 1,
         "round_two_sub_questions": round_two_count,
+        "budgets": budgets or {},
         "sub_questions": [
             {
                 "id": item["id"],
                 "query": item["query"],
                 "source": item["source"],
+                "pool": item.get("pool"),
                 "answer": item["answer"],
                 "coverage": item["coverage"],
                 "error": item["error"],
                 "key_entities": item["key_entities"],
+                "elapsed_ms": item.get("elapsed_ms"),
+                "usage": item.get("usage") or {},
+                "retrieval": item.get("retrieval") or [],
                 "evidence": [
                     {
                         "doc_id": evidence.get("doc_id"),
@@ -626,6 +847,9 @@ def build_trace(
             for item in sub_results
         ],
     }
+    if extra:
+        trace.update(extra)
+    return trace
 
 
 def run_enhanced(
@@ -638,32 +862,97 @@ def run_enhanced(
 
     trace 通过 trace_out 回传——生成器无法 return 值，接口层传入一个字典，
     消费完事件流后即可拿到过程记录并随消息落库。
+
+    整轮时间预算（`AGENT_TOTAL_BUDGET`）覆盖规划与两轮检索：规划后若已耗尽直接
+    退回标准模式单跳；第二轮开始前耗尽则跳过补充检索（缺项显式写入结果）；
+    合成始终执行——否则用户拿不到任何回答。
     """
-    search_tool = agent_tools.build_knowledge_search(user_role)
-    order_tool = agent_tools.build_order_query(user_role)
+    started = time.monotonic()
+    deadline = started + Config.AGENT_TOTAL_BUDGET
+    usage: dict = {"plan": {}, "sub_answers": [], "synthesis": {}}
+    round_two_ms: int | None = None
+    budget_exhausted = False
 
-    yield _event({"stage": "planning"})
-    plan = plan_question(question, history)
+    def remaining() -> float:
+        return deadline - time.monotonic()
 
-    if plan["fallback"]:
-        # 规划失败：退回标准模式单跳，并显式告诉用户（故障不静默）
-        if trace_out is not None:
-            trace_out.update(build_trace(plan, [], single_hop=True, fallback=True))
-        yield _event({"token": PLANNER_FALLBACK_PREFIX})
+    def write_trace(
+        plan_obj,
+        res,
+        *,
+        round_two_count=0,
+        single_hop=False,
+        fallback=False,
+        reason=None,
+        state=None,
+        synthesis_ms=None,
+    ) -> None:
+        if trace_out is None:
+            return
+        trace_out.update(
+            build_trace(
+                plan_obj,
+                res,
+                round_two_count=round_two_count,
+                single_hop=single_hop,
+                fallback=fallback,
+                fallback_reason=reason,
+                budgets=_budget_snapshot(state),
+                extra=_timing_extra(
+                    started,
+                    plan_ms,
+                    usage,
+                    round_two_ms,
+                    synthesis_ms,
+                    budget_exhausted,
+                ),
+            )
+        )
+
+    def standard_fallback(prefix: str):
+        """退回标准模式单跳；prefix 非空时先以 token 形式说明原因（故障不静默）。"""
+        if prefix:
+            yield _event({"token": prefix})
         for event in rag.answer_question(
             question, history=history, user_role=user_role, stream=True
         ):
             yield event
+
+    search_tool = agent_tools.build_knowledge_search(
+        user_role, k=Config.AGENT_RETRIEVE_K
+    )
+    order_tool = agent_tools.build_order_query(user_role)
+
+    yield _event({"stage": "planning"})
+    plan_started = time.monotonic()
+    plan = plan_question(question, history)
+    plan_ms = int((time.monotonic() - plan_started) * 1000)
+    usage["plan"] = plan.get("usage") or {}
+
+    if plan["fallback"]:
+        # 规划失败：退回标准模式单跳，并显式告诉用户（故障不静默）
+        write_trace(plan, [], single_hop=True, fallback=True, reason="planner_failed")
+        yield from standard_fallback(PLANNER_FALLBACK_PREFIX)
+        return
+
+    if remaining() <= 0:
+        # 规划就吃光了整轮预算：不再进入拆解循环
+        budget_exhausted = True
+        write_trace(plan, [], single_hop=True, fallback=True, reason="budget_exhausted")
+        yield from standard_fallback(BUDGET_FALLBACK_PREFIX)
         return
 
     if not plan["needs_decomposition"]:
         # 单跳短路：界面不做任何提示，只在 trace 里留痕
-        if trace_out is not None:
-            trace_out.update(build_trace(plan, [], single_hop=True))
-        for event in rag.answer_question(
-            question, history=history, user_role=user_role, stream=True
-        ):
-            yield event
+        write_trace(plan, [], single_hop=True)
+        yield from standard_fallback("")
+        return
+
+    if not plan["sub_questions"]:
+        # 声称要拆解却没给出子问题（模型异常输出）：按规划失败处理，
+        # 否则会带着空证据进入合成，等于给模型自由发挥的机会
+        write_trace(plan, [], single_hop=True, fallback=True, reason="planner_failed")
+        yield from standard_fallback(PLANNER_FALLBACK_PREFIX)
         return
 
     sub_questions = plan["sub_questions"]
@@ -694,17 +983,25 @@ def run_enhanced(
         order_tool,
         history,
         state,
+        timeout=min(Config.AGENT_SUB_TIMEOUT, max(1.0, remaining())),
     )
     for item in results:
-                yield _event(
-                    {
-                        "stage": "sub_answer",
-                        "sub_question_id": item["id"],
-                        "answer": item["answer"],
-                        "coverage": item["coverage"],
-                        "error": item["error"],
-                    }
-                )
+        yield _event(
+            {
+                "stage": "sub_answer",
+                "sub_question_id": item["id"],
+                "answer": item["answer"],
+                "coverage": item["coverage"],
+                "error": item["error"],
+            }
+        )
+
+    # 全部子问题被订单工具拒绝（越权）：不调用 LLM，直接给固定话术
+    if not pending and _all_order_denied(results):
+        write_trace(plan, results, reason="order_denied", state=state)
+        yield _event({"token": order_qa.ORDER_FORBIDDEN_ANSWER})
+        yield _event({"done": True, "sources": []})
+        return
 
     round_two_count = 0
     unresolved = unresolved_sub_questions(results)
@@ -731,29 +1028,130 @@ def run_enhanced(
         )
     if round_two_plan["sub_questions"]:
         round_two_count = len(round_two_plan["sub_questions"])
-        extra_results = answer_sub_questions(
-            round_two_plan, question, search_tool, order_tool, history, state
-        )
-        results.extend(extra_results)
-        for item in extra_results:
-            yield _event(
-                {
-                    "stage": "sub_answer",
-                    "sub_question_id": item["id"],
-                    "answer": item["answer"],
-                    "coverage": item["coverage"],
-                    "error": item["error"],
-                    "follow_up": True,
-                }
-            )
+        round_two_started = time.monotonic()
+        if remaining() <= 0:
+            # 整轮预算已耗尽：补充检索不再执行，缺项按「证据缺失」显式写入结果
+            budget_exhausted = True
+            for item in round_two_plan["sub_questions"]:
+                skipped = _base_result(item)
+                skipped["error"] = "超出整轮时间预算，未执行补充检索"
+                results.append(skipped)
+                yield _event(
+                    {
+                        "stage": "sub_answer",
+                        "sub_question_id": item["id"],
+                        "answer": "",
+                        "coverage": COVERAGE_MISSING,
+                        "error": skipped["error"],
+                        "follow_up": True,
+                    }
+                )
+        else:
+            extra_results: list[dict] = []
+            # 链式池先跑：链式延伸是规划阶段就确定的义务，不该被机会主义的补查抢占；
+            # 两个池额度独立、不互相借用（ADR 0010）
+            for batch_pool in (POOL_CHAIN, POOL_GAP):
+                batch = [
+                    item
+                    for item in round_two_plan["sub_questions"]
+                    if item.get("pool") == batch_pool
+                ]
+                if not batch:
+                    continue
+                extra_results.extend(
+                    answer_sub_questions(
+                        {"sub_questions": batch},
+                        question,
+                        search_tool,
+                        order_tool,
+                        history,
+                        state,
+                        timeout=min(Config.AGENT_SUB_TIMEOUT, max(1.0, remaining())),
+                    )
+                )
+            results.extend(extra_results)
+            for item in extra_results:
+                yield _event(
+                    {
+                        "stage": "sub_answer",
+                        "sub_question_id": item["id"],
+                        "answer": item["answer"],
+                        "coverage": item["coverage"],
+                        "error": item["error"],
+                        "follow_up": True,
+                    }
+                )
+        round_two_ms = int((time.monotonic() - round_two_started) * 1000)
 
-    if trace_out is not None:
-        trace_out.update(
-            build_trace(plan, results, round_two_count=round_two_count)
+    usage["sub_answers"] = [
+        {
+            "id": item["id"],
+            "elapsed_ms": item.get("elapsed_ms"),
+            "usage": item.get("usage") or {},
+        }
+        for item in results
+    ]
+
+    # 全部子问题作答失败：退回标准模式单跳重试一次（设计文档 2.6）
+    if results and all(item.get("error") for item in results):
+        logger.warning("全部子问题作答失败，退回标准模式单跳")
+        write_trace(
+            plan,
+            results,
+            round_two_count=round_two_count,
+            single_hop=True,
+            fallback=True,
+            reason="sub_answers_failed",
+            state=state,
         )
+        yield from standard_fallback(SUB_ANSWER_FALLBACK_PREFIX)
+        return
+
+    if _all_order_denied(results):
+        write_trace(
+            plan, results, round_two_count=round_two_count, reason="order_denied", state=state
+        )
+        yield _event({"token": order_qa.ORDER_FORBIDDEN_ANSWER})
+        yield _event({"done": True, "sources": []})
+        return
+
+    write_trace(plan, results, round_two_count=round_two_count, state=state)
 
     yield _event({"stage": "synthesizing"})
     prompt = build_synthesis_prompt(question, results, history)
-    for token in llm.stream(prompt):
-        yield _event({"token": token})
+    synthesis_started = time.monotonic()
+    synthesis_usage: dict = {}
+    emitted = False
+    try:
+        for token in llm.stream(
+            prompt,
+            max_tokens=Config.AGENT_SYNTHESIS_MAX_TOKENS,
+            usage=synthesis_usage,
+        ):
+            emitted = True
+            yield _event({"token": token})
+    except Exception:
+        synthesis_ms = int((time.monotonic() - synthesis_started) * 1000)
+        usage["synthesis"] = synthesis_usage
+        if emitted:
+            # 已经吐字，无法整段回退：交给接口层发 error 事件
+            raise
+        logger.exception("合成失败，退回标准模式单跳")
+        write_trace(
+            plan,
+            results,
+            round_two_count=round_two_count,
+            fallback=True,
+            reason="synthesis_failed",
+            state=state,
+            synthesis_ms=synthesis_ms,
+        )
+        yield from standard_fallback(SYNTHESIS_FALLBACK_PREFIX)
+        return
+    usage["synthesis"] = synthesis_usage
+    if trace_out is not None:
+        trace_out["timings"]["synthesis_ms"] = int(
+            (time.monotonic() - synthesis_started) * 1000
+        )
+        trace_out["timings"]["total_ms"] = int((time.monotonic() - started) * 1000)
     yield _event({"done": True, "sources": collect_sources(results)})
