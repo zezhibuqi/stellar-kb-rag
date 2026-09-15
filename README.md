@@ -213,6 +213,7 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 
 - 普通对话模型（DeepSeek、DeepSeek-V4-Flash@SiliconFlow 等）：默认参数即可；
 - **思考型模型**（先输出 `reasoning_content` 再输出 `content`）：路由调用需预留推理预算，设 `router_max_tokens=2000`；若该端点传 `response_format=json_object` 会报错或返回乱码，设 `supports_response_format=False`。判断方法：切换后问一句订单问题，失败时看后端日志与"测试连接"结果定位。
+- **流式 token 用量**：`supports_stream_usage` 默认 `True`，增强模式的流式调用会带 `stream_options.include_usage` 以把每步 token 用量写入 trace；端点不认识该参数时注册为 `False`（如 scnet），trace 里该步用量留空，回答不受影响。
 
 ---
 

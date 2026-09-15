@@ -151,6 +151,61 @@ def test_sub_answer_uses_configured_token_budget(monkeypatch):
     assert captured["max_tokens"] == Config.AGENT_SUB_ANSWER_MAX_TOKENS
 
 
+def test_sub_answer_records_usage_and_elapsed(monkeypatch):
+    """trace 需要的每步耗时与 token 用量：子答案步逐个记录（设计文档 7.8）。"""
+
+    def fake_invoke_json(prompt, **kwargs):
+        sink = kwargs.get("usage")
+        if sink is not None:
+            sink.update({"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10})
+        return {"answer": "A", "coverage": "sufficient"}
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", fake_invoke_json)
+    results = orchestrator.answer_sub_questions(
+        {"sub_questions": [_sub(1, "a")]},
+        "问题",
+        _search([_knowledge_item(1, 1, 2)]),
+        lambda *a: {},
+    )
+    assert results[0]["usage"]["total_tokens"] == 10
+    assert results[0]["elapsed_ms"] is not None
+    assert results[0]["elapsed_ms"] >= 0
+
+
+def test_failed_sub_answer_still_records_elapsed(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("上游失败")
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", boom)
+    results = orchestrator.answer_sub_questions(
+        {"sub_questions": [_sub(1, "a")]},
+        "问题",
+        _search([_knowledge_item(1, 1, 2)]),
+        lambda *a: {},
+    )
+    assert results[0]["error"] == "上游失败"
+    assert results[0]["elapsed_ms"] is not None, "失败也要留下耗时，便于排查"
+
+
+def test_batch_timeout_marks_unfinished_sub_questions(monkeypatch):
+    """编排器用整轮剩余预算收紧本批等待上限时的行为。"""
+    import time as _time
+
+    def slow(*args, **kwargs):
+        _time.sleep(0.5)
+        return {"answer": "A", "coverage": "sufficient"}
+
+    monkeypatch.setattr(orchestrator.llm, "invoke_json", slow)
+    results = orchestrator.answer_sub_questions(
+        {"sub_questions": [_sub(1, "a")]},
+        "问题",
+        _search([_knowledge_item(1, 1, 2)]),
+        lambda *a: {},
+        timeout=0.05,
+    )
+    assert results[0]["error"] == "子问题作答超时"
+
+
 def _round_one_result(key_entities):
     return {
         "id": 1,

@@ -1,12 +1,15 @@
 """增强模式接入测试（设计文档 6.2 / 7.5）：模式校验、stage 事件、trace 落库。"""
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 import llm
+import order_qa
 import orchestrator
 from app import create_app
+from config import Config
 
 
 @pytest.fixture()
@@ -308,3 +311,210 @@ def test_chain_triggers_round_two_even_when_round_one_succeeds(monkeypatch, clie
     )
     assert trace["budgets"]["chain_limit"] > 0
     assert trace["sub_questions"][1]["pool"] == "chain"
+
+
+# ── 编排层失败语义与预算（设计文档 2.6 / 7.8）─────────────────────────────
+
+
+def _consume(monkeypatch, plan, sub_results, *, question="问题", role="admin",
+             stream_impl=None, trace=None):
+    """直接消费 run_enhanced 事件流（不经 HTTP），用于失败分支测试。"""
+    monkeypatch.setattr(orchestrator, "plan_question", lambda q, history=None: plan)
+    monkeypatch.setattr(
+        orchestrator,
+        "answer_sub_questions",
+        lambda *args, **kwargs: [dict(item) for item in sub_results],
+    )
+    if stream_impl is not None:
+        monkeypatch.setattr(orchestrator.llm, "stream", stream_impl)
+    events = [json.loads(event) for event in orchestrator.run_enhanced(
+        question, role, None, trace
+    )]
+    return events
+
+
+def _order_denied_plan():
+    return {
+        "needs_decomposition": True,
+        "intent": "order",
+        "filters": {},
+        "aggregation": None,
+        "sub_questions": [
+            {
+                "id": 1,
+                "query": "DD20260315004",
+                "source": "order",
+                "filters": {"order_no": "DD20260315004"},
+                "aggregation": None,
+                "depends_on": None,
+            }
+        ],
+        "truncated": 0,
+        "fallback": False,
+    }
+
+
+def test_all_order_denied_returns_fixed_answer_without_llm(monkeypatch):
+    """越权订单：不调用任何 LLM，直接给固定话术（设计文档 2.6 安全约定）。"""
+    plan = _order_denied_plan()
+    denied = orchestrator._base_result(plan["sub_questions"][0])
+    denied["order"] = {
+        "status": "denied",
+        "rows": [],
+        "aggregation": None,
+        "truncated": False,
+    }
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("全部订单子问题被拒绝时不得调用 LLM")
+
+    trace: dict = {}
+    events = _consume(
+        monkeypatch, plan, [denied], role="employee", stream_impl=forbidden, trace=trace
+    )
+    text = "".join(event["token"] for event in events if "token" in event)
+    assert text == order_qa.ORDER_FORBIDDEN_ANSWER
+    assert [event for event in events if event.get("done")][0]["sources"] == []
+    assert trace["fallback_reason"] == "order_denied"
+
+
+def test_all_sub_answers_failed_falls_back_to_standard(monkeypatch):
+    """全部子问题作答失败：退回标准模式单跳一次，并显式说明（设计文档 2.6）。"""
+    plan = _plan()
+    failed = orchestrator._base_result(plan["sub_questions"][0])
+    failed["error"] = "上游失败"
+    monkeypatch.setattr(
+        orchestrator.rag,
+        "answer_question",
+        lambda *args, **kwargs: iter(
+            ['{"token": "标准回答"}', '{"done": true, "sources": []}']
+        ),
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("全部子答案失败时不应进入合成调用")
+
+    trace: dict = {}
+    events = _consume(
+        monkeypatch, plan, [failed], stream_impl=forbidden, trace=trace
+    )
+    text = "".join(event["token"] for event in events if "token" in event)
+    assert orchestrator.SUB_ANSWER_FALLBACK_PREFIX in text
+    assert "标准回答" in text
+    assert trace["fallback"] is True
+    assert trace["fallback_reason"] == "sub_answers_failed"
+
+
+def test_decomposition_without_sub_questions_falls_back(monkeypatch):
+    """规划说要拆解却给出空列表：按规划失败退回标准模式，不得带空证据合成。"""
+    plan = {
+        "needs_decomposition": True,
+        "intent": "knowledge",
+        "filters": {},
+        "aggregation": None,
+        "sub_questions": [],
+        "truncated": 0,
+        "fallback": False,
+    }
+    monkeypatch.setattr(
+        orchestrator.rag,
+        "answer_question",
+        lambda *args, **kwargs: iter(['{"token": "标准回答"}']),
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("空子问题列表不得进入合成调用")
+
+    trace: dict = {}
+    events = _consume(monkeypatch, plan, [], stream_impl=forbidden, trace=trace)
+    text = "".join(event["token"] for event in events if "token" in event)
+    assert orchestrator.PLANNER_FALLBACK_PREFIX in text
+    assert "标准回答" in text
+    assert trace["fallback_reason"] == "planner_failed"
+
+
+def test_total_budget_exhausted_skips_round_two(monkeypatch):
+    """第一轮耗尽整轮预算：跳过补充检索、缺项显式落库（AGENT_TOTAL_BUDGET）。"""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(orchestrator.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(Config, "AGENT_TOTAL_BUDGET", 100)
+    plan = {
+        "needs_decomposition": True,
+        "intent": "knowledge",
+        "filters": {},
+        "aggregation": None,
+        "sub_questions": [
+            {
+                "id": 1,
+                "query": "SC-500 配套电芯 型号",
+                "source": "knowledge",
+                "filters": {},
+                "aggregation": None,
+                "depends_on": None,
+            },
+            {
+                "id": 2,
+                "query": "{1} 循环寿命",
+                "source": "knowledge",
+                "filters": {},
+                "aggregation": None,
+                "depends_on": 1,
+            },
+        ],
+        "truncated": 0,
+        "fallback": False,
+    }
+
+    def answer(*args, **kwargs):
+        clock["t"] = 2000.0  # 第一轮把 100s 预算耗尽
+        item = orchestrator._base_result(plan["sub_questions"][0])
+        item["answer"] = "SC-300"
+        item["coverage"] = "sufficient"
+        item["key_entities"] = ["SC-300"]
+        return [item]
+
+    monkeypatch.setattr(orchestrator, "plan_question", lambda q, history=None: plan)
+    monkeypatch.setattr(orchestrator, "answer_sub_questions", answer)
+    monkeypatch.setattr(orchestrator.llm, "stream", lambda *a, **k: iter(["答"]))
+
+    trace: dict = {}
+    events = [
+        json.loads(event)
+        for event in orchestrator.run_enhanced("问题", "admin", None, trace)
+    ]
+    follow_ups = [
+        event
+        for event in events
+        if event.get("stage") == "sub_answer" and event.get("follow_up")
+    ]
+    assert follow_ups and follow_ups[0]["error"] == "超出整轮时间预算，未执行补充检索"
+    assert trace["budget_exhausted"] is True
+    assert trace["round_two_sub_questions"] == 1
+    assert trace["timings"]["total_budget_s"] == 100
+
+
+def test_trace_records_model_timings_and_usage(monkeypatch):
+    """trace 补齐模型 id、每步耗时与 token 用量（设计文档 7.8）。"""
+    plan = _plan()
+    plan["usage"] = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+    item = _sub_results()[0]
+    item["usage"] = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+    item["elapsed_ms"] = 1234
+
+    def fake_stream(prompt, **kwargs):
+        kwargs["usage"].update(
+            {"prompt_tokens": 500, "completion_tokens": 50, "total_tokens": 550}
+        )
+        return iter(["答"])
+
+    trace: dict = {}
+    _consume(monkeypatch, plan, [item], stream_impl=fake_stream, trace=trace)
+
+    assert trace["model"]["id"] == llm.get_active_provider().id
+    assert trace["model"]["model"]
+    assert trace["timings"]["plan_ms"] >= 0
+    assert trace["timings"]["synthesis_ms"] >= 0
+    assert trace["usage"]["plan"]["total_tokens"] == 12
+    assert trace["usage"]["synthesis"]["total_tokens"] == 550
+    assert trace["usage"]["sub_answers"][0]["usage"]["total_tokens"] == 120
+    assert trace["sub_questions"][0]["elapsed_ms"] == 1234
