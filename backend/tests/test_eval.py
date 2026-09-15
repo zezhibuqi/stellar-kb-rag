@@ -10,6 +10,7 @@ from eval import evaluate
 
 
 def test_golden_set_coverage():
+    """Golden Set 数据完整性：≥75 条、五个领域各 ≥15 条、每条三要素齐全。"""
     golden = json.loads(
         Path("docs/golden_set.json").read_text(encoding="utf-8")
     )
@@ -24,18 +25,24 @@ def test_golden_set_coverage():
 
 
 def _doc(content: str) -> Document:
+    """构造评测用的文档对象（domain 固定 finance，只用于命中判定）。"""
     return Document(page_content=content, metadata={"domain": "finance"})
 
 
 class FakePipeline:
+    """用「问题 → 命中列表」映射替身真实检索管线，让指标计算可被精确断言。"""
+
     def __init__(self, mapping: dict):
+        """保存预置的 问题→文档列表 映射。"""
         self.mapping = mapping
 
     def retrieve(self, question: str):
+        """按问题返回预置结果（等价于 RAGPipelineForEval.retrieve 的输出）。"""
         return self.mapping[question]
 
 
 def test_evaluate_hit_rate_and_mrr():
+    """Hit Rate 与 MRR 的计算口径：命中位置越靠前 MRR 越高，未命中不计入 MRR 分子。"""
     golden = [
         {
             "domain": "finance",

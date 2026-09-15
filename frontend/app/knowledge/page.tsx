@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * 知识库管理页（仅 admin）：上传 Markdown → 后台异步灌库 → 轮询状态 → 列表增删。
+ *
+ * 灌库是异步的：上传接口立即返回 pending 与 doc_id，本页按 2 秒间隔轮询状态，
+ * 终态（completed/failed）时停止轮询并刷新列表。
+ */
 import { DeleteOutlined, UploadOutlined } from "@ant-design/icons";
 import {
   Badge,
@@ -23,6 +29,7 @@ import {
   type DocInfo,
 } from "@/lib/api";
 
+/** 上传时可选的五个知识领域（value 与后端 domains.name 一致）。 */
 const DOMAIN_OPTIONS = [
   { value: "finance", label: "财务数据" },
   { value: "regulation", label: "规章制度" },
@@ -31,6 +38,7 @@ const DOMAIN_OPTIONS = [
   { value: "common", label: "公共知识" },
 ];
 
+/** 文档状态 → 徽标样式与中文文案（对应后端的四种状态）。 */
 const STATUS_BADGES: Record<string, { status: "default" | "processing" | "success" | "error"; label: string }> = {
   pending: { status: "default", label: "待处理" },
   processing: { status: "processing", label: "灌库中" },
@@ -38,6 +46,7 @@ const STATUS_BADGES: Record<string, { status: "default" | "processing" | "succes
   failed: { status: "error", label: "失败" },
 };
 
+/** 知识库管理页组件：自持文档列表、上传表单与轮询定时器。 */
 export default function KnowledgePage() {
   const [docs, setDocs] = useState<DocInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,6 +81,7 @@ export default function KnowledgePage() {
   );
 
   const startPolling = (docId: number) => {
+    // 轮询间隔固定 2 秒：灌库耗时取决于 Embedding 接口，轮询过密没有收益
     setPolling(true);
     pollTimer.current = setInterval(async () => {
       try {

@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * 模型设置页（仅 admin）：从注册表动态渲染提供方卡片，支持切换当前模型与连通性测试。
+ *
+ * 页面不硬编码任何模型信息——新增提供方只需改后端注册表，这里自动出现新卡片。
+ * 密钥只来自服务端 .env，页面只显示「已配置 / 未配置」，不回显密钥值。
+ */
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -25,11 +31,13 @@ import {
   type ModelSettings,
 } from "@/lib/api";
 
+/** 单个提供方的连通性测试状态（idle → testing → ok/failed）。 */
 interface TestState {
   status: "idle" | "testing" | "ok" | "failed";
   detail?: string;
 }
 
+/** 模型设置页组件。 */
 export default function SettingsPage() {
   const [settings, setSettings] = useState<ModelSettings | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,6 +62,7 @@ export default function SettingsPage() {
   }, [load]);
 
   const handleSwitch = async (providerId: string) => {
+    // 切换成功后服务端返回新的设置快照，直接整体替换本地状态（含 active 标记）
     setSwitching(providerId);
     try {
       setSettings(await switchModel(providerId));

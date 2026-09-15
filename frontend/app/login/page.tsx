@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * 登录页：账号密码表单 + 主题切换；登录成功后把 token 与用户信息写入 localStorage。
+ *
+ * 系统不提供注册入口（用户由管理员创建），登录页也不做任何权限判断——
+ * 角色相关的菜单与路由守卫在 LayoutWrapper 内完成。
+ */
 import { MoonOutlined, StarFilled, SunOutlined } from "@ant-design/icons";
 import { Button, Form, Input, Typography, message } from "antd";
 import { useRouter } from "next/navigation";
@@ -13,12 +19,14 @@ import {
 } from "@/lib/api";
 import { useThemeMode } from "@/components/ThemeProvider";
 
+/** 登录页组件。 */
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const { mode, toggle } = useThemeMode();
 
   useEffect(() => {
+    // 已登录（本地有用户信息）直接进问答页，避免重复登录
     if (getStoredUser()) {
       router.replace("/chat");
     }

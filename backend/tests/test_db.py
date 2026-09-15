@@ -26,6 +26,7 @@ from models import (
 
 
 def test_schema_tables_and_columns():
+    """Schema 与设计文档 5.1 一致：四张核心表的字段集合精确匹配（多/少字段都算失败）。"""
     conn = get_connection()
     tables = {
         row["name"]
@@ -71,6 +72,7 @@ def test_schema_tables_and_columns():
 
 
 def test_seed_domains_and_permissions():
+    """种子权限矩阵：5 个领域、16 条角色-领域关系，admin 覆盖全部领域。"""
     conn = get_connection()
     assert conn.execute("SELECT COUNT(*) AS c FROM domains").fetchone()["c"] == 5
     assert (
@@ -86,6 +88,7 @@ def test_seed_domains_and_permissions():
 
 
 def test_seed_default_users():
+    """默认账号齐全，且 5 个账号的初始密码都能用 123456 校验通过。"""
     users = list_users()
     by_name = {user["username"]: user for user in users}
     assert set(by_name) == {"admin", "employee", "finance", "sales", "aftersale"}
@@ -97,14 +100,17 @@ def test_seed_default_users():
 
 
 def test_wal_enabled():
+    """WAL 模式生效——后台灌库线程与请求线程并发读写的前提。"""
     row = get_connection().execute("PRAGMA journal_mode").fetchone()
     assert row[0].lower() == "wal"
 
 
 def test_thread_independent_connections_and_concurrent_write():
+    """每个线程各持独立连接且 5 线程并发写入全部成功（验证线程本地连接实现）。"""
     connection_ids: dict[int, int] = {}
 
     def write_in_thread(idx: int) -> bool:
+        """在工作线程里建连接并写一行，回传连接 id 供断言「各线程不共享连接」。"""
         conn = get_connection()
         connection_ids[idx] = id(conn)
         with transaction() as cur:
@@ -128,6 +134,7 @@ def test_thread_independent_connections_and_concurrent_write():
 
 
 def test_user_crud_and_validations():
+    """用户 CRUD 与参数校验：密码长度、角色白名单、重名、角色更新与不存在 id 的处理。"""
     with pytest.raises(ValueError):
         create_user("alice", "123")
     with pytest.raises(ValueError):
@@ -149,6 +156,7 @@ def test_user_crud_and_validations():
 
 
 def test_user_soft_delete_activate_and_reset_password():
+    """停用/启用切换，以及重置密码使 token_version 自增（旧 token 失效的依据）。"""
     user_id = create_user("to_manage", "secret123", role="employee")
     user = get_user_by_username("to_manage")
     assert user["is_active"] == 1
@@ -170,6 +178,7 @@ def test_user_soft_delete_activate_and_reset_password():
 
 
 def test_document_crud():
+    """文档生命周期：pending → processing → completed/failed，列表不返回全文，删除生效。"""
     doc_id = create_document(
         "2024年报.md",
         "finance",
@@ -202,6 +211,7 @@ def test_document_crud():
 
 
 def test_allowed_domains():
+    """五个角色的可访问领域与设计文档 2.2 的权限矩阵逐一对齐。"""
     assert set(get_allowed_domains("employee")) == {"common", "regulation"}
     assert set(get_allowed_domains("finance")) == {"common", "finance", "regulation"}
     assert set(get_allowed_domains("sales")) == {"common", "product", "regulation"}
@@ -216,6 +226,7 @@ def test_allowed_domains():
 
 
 def test_persistence_after_reconnect():
+    """关闭连接后重连数据仍在（验证落盘而非仅存在于内存连接）。"""
     create_user("persist_user", "secret123")
     assert get_user_by_username("persist_user") is not None
 

@@ -16,6 +16,7 @@ EXPECTED_DOMAINS = {
 
 
 def _seed_all_domains(monkeypatch):
+    """往 Chroma 里为五个领域各写一条假向量，供权限过滤断言使用（不调用真实 Embedding）。"""
     monkeypatch.setattr(
         embeddings,
         "embed_texts",
@@ -35,6 +36,7 @@ def _seed_all_domains(monkeypatch):
 
 @pytest.mark.parametrize("role", sorted(EXPECTED_DOMAINS))
 def test_search_with_permission_filters_domains(role, monkeypatch):
+    """检索结果必须精确等于该角色的允许领域集合——多一个即越权、少一个即召回缺失。"""
     _seed_all_domains(monkeypatch)
     docs = search_with_permission("领域内容", role, k=10)
     domains = {doc.metadata["domain"] for doc in docs}

@@ -61,6 +61,7 @@ _ROUTE_EXAMPLES = """示例1：
 
 
 def _format_history(history: list | None) -> str:
+    """把最近对话拼进路由提示词；订单问题常带指代（「那笔订单」），历史是必要上下文。"""
     parts = []
     for msg in history or []:
         role = msg.get("role")
@@ -73,6 +74,10 @@ def _format_history(history: list | None) -> str:
 
 
 def build_route_prompt(question: str, history: list | None) -> str:
+    """意图路由提示词：注入当天日期 + 允许的过滤键 + 7 个 few-shot 示例。
+
+    注入日期是为了让「6 月的订单」这类相对表述能换算成绝对日期区间。
+    """
     return (
         "你是企业知识系统的订单查询意图路由器。当前日期："
         f"{date.today().isoformat()}。\n"
@@ -125,6 +130,7 @@ def route_question(question: str, history: list | None = None) -> dict:
 
 
 def _valid_date(value) -> date | None:
+    """校验 YYYY-MM-DD 并转成 date；格式或取值非法返回 None（调用方丢弃该条件）。"""
     if not isinstance(value, str) or not _DATE_RE.match(value):
         return None
     try:
@@ -215,6 +221,7 @@ def execute_order_query(filters: dict, aggregation: str | None = None) -> dict:
 
 
 def mask_contact(contact) -> str:
+    """手机号脱敏（前 3 后 4）；非 11 位数字原样返回（公司名等非手机号联系方式）。"""
     if contact and len(contact) == 11 and contact.isdigit():
         return f"{contact[:3]}****{contact[-4:]}"
     return contact or ""

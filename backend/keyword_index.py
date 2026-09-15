@@ -57,10 +57,12 @@ def build_match_query(terms: list[str]) -> str:
 
 
 def _escape_like(term: str) -> str:
+    """转义 LIKE 通配符，保证用户/规划器给的字面量按原样匹配（防 `%` 全表通配）。"""
     return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _domain_clause(domains: list[str] | None, params: list) -> str:
+    """拼领域过滤子句并把参数追加到 params；domains 为空表示不过滤（仅测试用）。"""
     if not domains:
         return ""
     placeholders = ", ".join("?" for _ in domains)
@@ -69,6 +71,7 @@ def _domain_clause(domains: list[str] | None, params: list) -> str:
 
 
 def _rows(cursor) -> list[dict]:
+    """把 FTS/LIKE 查询结果转成统一的行结构，两条路径共用同一字段名。"""
     return [
         {
             "doc_id": row["doc_id"],
@@ -88,6 +91,10 @@ def _rows(cursor) -> list[dict]:
 def _match_terms(
     conn, terms: list[str], domains, per_term: int
 ) -> list[tuple[str, list[dict]]]:
+    """对每个词单独跑 FTS5 MATCH，返回 (词, 命中行) 列表；零命中的词不进池。
+
+    每个词按 bm25 排序取前 per_term 条，配额在词之间平分，避免常见词吃满额度。
+    """
     pools: list[tuple[str, list[dict]]] = []
     for term in terms:
         match_query = build_match_query([term])
@@ -111,6 +118,10 @@ def _match_terms(
 def _like_terms(
     conn, terms: list[str], domains, per_term: int
 ) -> list[tuple[str, list[dict]]]:
+    """LIKE 兜底路径：短词（<3 字）与长片段派生的二字头/尾词走这里。
+
+    自带独立配额、不参与 RRF——它只负责「把明显该命中的块捞进候选」。
+    """
     pools: list[tuple[str, list[dict]]] = []
     for term in terms:
         params: list = [f"%{_escape_like(term)}%"]
@@ -231,12 +242,14 @@ def index_document(doc_id: int) -> int:
 
 
 def delete_document(doc_id: int) -> None:
+    """删除文档时按 doc_id 清理关键词索引（与 Chroma 清理成对调用）。"""
     conn = get_connection()
     with conn:
         conn.execute("DELETE FROM chunk_index WHERE doc_id = ?", (doc_id,))
 
 
 def missing_document_ids() -> list[int]:
+    """尚未写入关键词索引的文档 id（keyword_indexed_at IS NULL），回填与健康检查用。"""
     conn = get_connection()
     return [
         row["id"]

@@ -74,6 +74,11 @@ _PLAN_EXAMPLES = """示例1（并列型，同一实体的多个属性）：
 
 
 def build_plan_prompt(question: str, history: list | None = None) -> str:
+    """规划提示词：判定意图 + 抽过滤条件 + 拆子问题，并给出并列/链式/单跳三类示例。
+
+    规则里最要紧的两条：子问题写成「实体 + 属性 + 限定条件」的检索式（不丢年度/温度
+    等量化条件）；链式问题用 `{前一步 id}` 占位 + depends_on 表达第二跳。
+    """
     return (
         "你是企业知识系统的问答规划器。判断问题是否需要拆解，输出严格 JSON："
         '{"needs_decomposition": true|false, "intent": "order"|"knowledge"|"mixed", '
@@ -104,10 +109,16 @@ def _clean_filters(raw) -> dict:
 
 
 def _clean_aggregation(raw):
+    """聚合方式白名单过滤：非 count/sum/avg 一律当作「不聚合」。"""
     return raw if raw in order_qa.ALLOWED_AGGREGATIONS else None
 
 
 def _sanitize_sub_question(raw, index: int) -> dict | None:
+    """清洗单个子问题：query 必填、source 非法降级为 knowledge、过滤键走白名单。
+
+    id 一律由编排器按顺序重新编号，不采信模型给的编号（链式依赖会因此错位）；
+    原始 depends_on 暂存为 depends_on_raw，等全部子问题编号确定后再解析。
+    """
     if not isinstance(raw, dict):
         return None
     query = (raw.get("query") or raw.get("text") or "").strip()
@@ -130,6 +141,11 @@ def _sanitize_sub_question(raw, index: int) -> dict | None:
 
 
 def _normalize(data: dict) -> dict:
+    """把模型输出的规划 JSON 规整成内部契约（规划输出一律视为不可信输入）。
+
+    职责：校验 intent、逐条清洗子问题、把模型自编的依赖编号映射到本系统编号、
+    按 `AGENT_MAX_SUB_QUESTIONS` 截断并记录截断数。
+    """
     intent = data.get("intent")
     if intent not in INTENTS:
         raise ValueError(f"非法 intent：{intent}")
@@ -209,6 +225,10 @@ def plan_question(question: str, history: list | None = None) -> dict:
 def build_sub_answer_prompt(
     question: str, sub_question: dict, evidence_text: str
 ) -> str:
+    """子答案提示词：只答当前子问题、数值逐字引用、证据不足要标 coverage。
+
+    同时要求模型给出可供下一轮检索的 key_entities（链式第二跳靠它填占位符）。
+    """
     return (
         "你是企业知识系统的子问题回答器。只回答给定的子问题，不要扩展、不要替用户"
         "回答别的问题。\n"
@@ -226,6 +246,10 @@ def build_sub_answer_prompt(
 
 
 def _format_knowledge_evidence(items: list[dict]) -> str:
+    """把证据单元编号排版成 `[n] 文件名（领域，起止行）` + 原文，供提示词引用。
+
+    编号是子答案与合成阶段引用依据的锚点（evidence_ids）。
+    """
     lines = []
     for index, item in enumerate(items, start=1):
         lines.append(
@@ -248,6 +272,7 @@ POOL_GAP = "gap"
 
 
 def _pool_limit(pool: str, state: dict | None = None) -> int:
+    """取某个池的额度：优先用本轮算好的动态限额，没有则回退配置默认值。"""
     if state is not None and pool in state.get("limits", {}):
         return state["limits"][pool]
     if pool == POOL_CHAIN:
@@ -386,6 +411,10 @@ def collect_evidence(
 
 
 def _base_result(sub_question: dict) -> dict:
+    """子问题结果骨架：先填满所有字段（缺省为空/未作答），调用方只覆盖拿到的部分。
+
+    保证后续 trace、合成与前端事件读到的结构稳定，不必到处 get(...) 兜底。
+    """
     return {
         "id": sub_question["id"],
         "query": sub_question["query"],
@@ -405,6 +434,10 @@ def _base_result(sub_question: dict) -> dict:
 
 
 def _normalize_sub_answer(data: dict) -> dict:
+    """规整子答案 JSON：coverage 非法时按「有答案即 sufficient」兜底，实体最多取 2 个。
+
+    多候选场景下 2 个是「并列呈现」的上限，超出只当作歧义、不做猜测（设计文档 7.8）。
+    """
     answer = (data.get("answer") or "").strip()
     coverage = data.get("coverage")
     if coverage not in COVERAGES:
@@ -450,6 +483,10 @@ def answer_sub_questions(
     wait_timeout = Config.AGENT_SUB_TIMEOUT if timeout is None else max(0.0, timeout)
 
     def run(index: int) -> dict:
+        """单个子问题的完整处理：取证据 → 组装提示词 → 调用 LLM → 记录耗时与用量。
+
+        异常在此吞掉并写入 result["error"]，让其它子问题不受影响（失败隔离）。
+        """
         started = time.monotonic()
         result = _base_result(sub_questions[index])
         try:
@@ -534,6 +571,11 @@ def unresolved_sub_questions(sub_results: list[dict]) -> list[int]:
 def build_synthesis_prompt(
     question: str, sub_results: list[dict], history: list | None = None
 ) -> str:
+    """合成提示词：按子问题逐项落位，缺项显式写「未在知识库中找到依据」。
+
+    强调两点：子答案只是线索、事实必须以「依据」原文为准；数值必须逐字可查，
+    不许四舍五入或换算单位——这是抑制数值幻觉的最后一道闸。
+    """
     blocks: list[str] = []
     for item in sub_results:
         if item["error"]:
@@ -577,10 +619,16 @@ def synthesize(
 
 
 def _event(payload: dict) -> str:
+    """把编排事件序列化成 SSE data 帧（与标准模式共用同一种线格式）。"""
     return json.dumps(payload, ensure_ascii=False)
 
 
 def _fill_placeholder(query: str, dependency_id, entity: str) -> str:
+    """把链式查询里的 `{id}` 占位符替换成上一跳得到的实体。
+
+    占位符不存在时退化为「实体 + 查询」拼接：规划器偶尔会忘记写占位符，
+    拼接至少能把实体带进检索式，比丢弃这一跳好。
+    """
     placeholder = "{" + str(dependency_id) + "}"
     if placeholder in query:
         return query.replace(placeholder, entity)
@@ -598,6 +646,7 @@ def _strip_placeholders(query: str) -> str:
 
 
 def _normalize_query(query: str) -> str:
+    """查询归一化（压空白 + 小写），只用于查重比较，不回写实际检索式。"""
     return " ".join((query or "").split()).lower()
 
 
@@ -645,6 +694,7 @@ def build_round_two_plan(
         alt_query: str | None = None,
         pool: str = POOL_GAP,
     ) -> None:
+        """登记一个第二轮子问题：自动编号、记录备用查询与所属预算池。"""
         added_queries.append(_normalize_query(query))
         sub_questions.append(
             {
@@ -814,6 +864,11 @@ def build_trace(
     fallback_reason: str | None = None,
     extra: dict | None = None,
 ) -> dict:
+    """组装落库用 trace：短路/回退标记、轮次、预算池用量、逐子问题的答案与检索归因。
+
+    extra 承载模型 id、每步耗时与 token 用量（见 `_timing_extra`）；
+    trace 只供调试与评测，不在界面上展示明细（前端仅用子问题与覆盖状态）。
+    """
     trace = {
         "single_hop": single_hop,
         "fallback": fallback,
@@ -874,6 +929,7 @@ def run_enhanced(
     budget_exhausted = False
 
     def remaining() -> float:
+        """整轮预算剩余秒数；每批子答案与第二轮开始前都要过这道闸。"""
         return deadline - time.monotonic()
 
     def write_trace(
@@ -887,6 +943,7 @@ def run_enhanced(
         state=None,
         synthesis_ms=None,
     ) -> None:
+        """把当前进度写进 trace_out（接口层的同一个 dict 会在消息落库时序列化）。"""
         if trace_out is None:
             return
         trace_out.update(

@@ -22,6 +22,7 @@ DEFAULT_QUESTION = (
 
 
 def _login(username: str, password: str) -> str:
+    """演示脚本登录，返回 JWT；非 2xx 直接抛异常终止演示。"""
     resp = requests.post(
         f"{BASE}/api/auth/login",
         json={"username": username, "password": password},
@@ -32,6 +33,11 @@ def _login(username: str, password: str) -> str:
 
 
 def main() -> None:
+    """增强模式端到端演示：登录 → 新建会话 → 提问 → 打印 stage 事件/回答/来源。
+
+    这是人工验收增强模式的主要入口（交接文档第 5 节）：
+    观察 planned 的子问题列表、sub_answer 的覆盖状态、补充检索标记与分组来源。
+    """
     parser = argparse.ArgumentParser(description="增强模式演示")
     parser.add_argument("--question", default=DEFAULT_QUESTION)
     parser.add_argument("--username", default="admin")

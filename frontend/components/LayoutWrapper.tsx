@@ -1,5 +1,13 @@
 "use client";
 
+/**
+ * 全局布局：顶栏（品牌 + 主题切换 + 用户菜单）、左侧导航与内容区。
+ *
+ * 同时承担两个前端侧的粗粒度守卫：
+ * - 未登录（localStorage 无用户）直接跳 /login；
+ * - 非管理员访问 /knowledge、/users、/settings，或非 aftersale/admin 访问 /orders 时跳回 /chat。
+ * 真正的权限判断仍在服务端——这里只是避免用户看到必然 403 的页面。
+ */
 import {
   ControlOutlined,
   DatabaseOutlined,
@@ -37,6 +45,7 @@ import {
 } from "@/lib/api";
 import { useThemeMode } from "@/components/ThemeProvider";
 
+/** 顶栏左侧的品牌标识（内联样式的渐变小方块 + 星标）。 */
 const BRAND_MARK = (
   <div
     style={{
@@ -55,6 +64,12 @@ const BRAND_MARK = (
   </div>
 );
 
+/**
+ * 布局组件：包装所有登录后页面。
+ *
+ * 修改密码成功后会把服务端返回的新 token 写回本地——旧 token 因 token_version 自增
+ * 已失效，不替换会导致下一次请求 401 被踢回登录页。
+ */
 export default function LayoutWrapper({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -77,6 +92,7 @@ export default function LayoutWrapper({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user) return;
+    // 页面级守卫：与菜单项的可⻅性保持一致，防止用户手敲 URL 进入无权限页面
     const adminOnly =
       pathname === "/knowledge" || pathname === "/users" || pathname === "/settings";
     const ordersPage = pathname === "/orders";

@@ -11,6 +11,10 @@ from models import create_document, get_document, init_db
 
 
 def main() -> None:
+    """离线灌库入口：对每个 .md 同步提交流水线并打印最终状态与切块数。
+
+    走的是与网页上传完全相同的 tasks 流水线，保证两条灌库路径行为一致。
+    """
     parser = argparse.ArgumentParser(description="离线灌库脚本")
     parser.add_argument(
         "--domain",

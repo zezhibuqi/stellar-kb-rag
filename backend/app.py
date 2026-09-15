@@ -66,6 +66,10 @@ def check_components() -> dict:
 
 
 def create_app(config: Config | None = None) -> Flask:
+    """应用工厂：装配 CORS、错误处理、健康检查与全部蓝图。
+
+    config 参数用于测试注入（覆盖数据库/Chroma 路径等），生产启动走默认 Config。
+    """
     app = Flask(__name__)
     app.config.from_object(config or Config)
     CORS(app, origins=app.config["CORS_ORIGINS"])
@@ -73,6 +77,7 @@ def create_app(config: Config | None = None) -> Flask:
 
     @app.get("/api/health")
     def health():
+        """健康检查：任一组件异常时整体状态降级为 degraded，前端与运维据此判断。"""
         components = check_components()
         status = (
             "ok"

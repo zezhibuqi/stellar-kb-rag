@@ -5,6 +5,7 @@ from models import get_connection
 
 
 def test_orders_schema():
+    """orders 表字段与设计文档一致（多字段/少字段都算失败）。"""
     conn = get_connection()
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(orders)")}
     assert columns == {
@@ -22,6 +23,7 @@ def test_orders_schema():
 
 
 def test_orders_seeded_and_idempotent():
+    """种子约 50 条且可重复执行：再次 seed_orders() 不重复插入。"""
     conn = get_connection()
     count = conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
     assert 45 <= count <= 55
@@ -33,6 +35,7 @@ def test_orders_seeded_and_idempotent():
 
 
 def test_orders_amount_and_status_derivation():
+    """逐条核对金额 = 单价 × 数量、完成时间与状态推导，并留出未完成订单的合理区间。"""
     conn = get_connection()
     rows = build_orders()
     for order in rows:

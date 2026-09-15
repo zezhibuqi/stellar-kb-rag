@@ -5,11 +5,13 @@ from config import Config
 
 
 def _plan(monkeypatch, payload):
+    """把 llm.invoke_json 固定返回 payload，然后跑一次 plan_question。"""
     monkeypatch.setattr(orchestrator.llm, "invoke_json", lambda *a, **k: payload)
     return orchestrator.plan_question("问题")
 
 
 def test_plan_parses_sub_questions(monkeypatch):
+    """规划解析：id 由编排器重新编号（不采信模型编号），过滤条件保留。"""
     plan = _plan(
         monkeypatch,
         {
@@ -30,6 +32,7 @@ def test_plan_parses_sub_questions(monkeypatch):
 
 
 def test_plan_drops_unknown_filters_and_bad_values(monkeypatch):
+    """未知过滤键（drop_table）与非法聚合（delete_all）都被丢弃，合法条件保留。"""
     plan = _plan(
         monkeypatch,
         {
@@ -43,6 +46,7 @@ def test_plan_drops_unknown_filters_and_bad_values(monkeypatch):
 
 
 def test_plan_defaults_unknown_source_to_knowledge(monkeypatch):
+    """子问题 source 非法（sql）时降级为 knowledge，避免走到未授权的工具。"""
     plan = _plan(
         monkeypatch,
         {"intent": "knowledge", "sub_questions": [{"query": "q", "source": "sql"}]},
@@ -51,6 +55,7 @@ def test_plan_defaults_unknown_source_to_knowledge(monkeypatch):
 
 
 def test_plan_truncates_beyond_execution_limit(monkeypatch):
+    """超过子问题执行上限的部分被截断，并如实记录 truncated 数量。"""
     total = Config.AGENT_MAX_SUB_QUESTIONS + 3
     plan = _plan(
         monkeypatch,
@@ -64,9 +69,11 @@ def test_plan_truncates_beyond_execution_limit(monkeypatch):
 
 
 def test_plan_rejects_illegal_intent_then_falls_back(monkeypatch):
+    """非法 intent 触发重试一次，仍失败则返回 fallback（不抛异常中断问答）。"""
     calls = {"n": 0}
 
     def bad(*args, **kwargs):
+        """每次调用都返回非法 intent，用于验证重试上限。"""
         calls["n"] += 1
         return {"intent": "database"}
 
@@ -79,6 +86,7 @@ def test_plan_rejects_illegal_intent_then_falls_back(monkeypatch):
 
 
 def test_plan_single_hop_keeps_fields(monkeypatch):
+    """单跳判定：needs_decomposition=False 时意图/过滤/聚合仍要完整保留（驱动标准链路）。"""
     plan = _plan(
         monkeypatch,
         {
@@ -95,6 +103,7 @@ def test_plan_single_hop_keeps_fields(monkeypatch):
 
 
 def test_plan_keeps_depends_on_for_chain(monkeypatch):
+    """链式依赖被保留：第二跳的 depends_on 指向第一跳，供后续填占位符。"""
     plan = _plan(
         monkeypatch,
         {
@@ -114,6 +123,7 @@ def test_plan_keeps_depends_on_for_chain(monkeypatch):
 
 
 def test_plan_drops_unknown_dependency(monkeypatch):
+    """依赖指向不存在的子问题时被清空（防止编排器索引越界或死等）。"""
     plan = _plan(
         monkeypatch,
         {
@@ -129,6 +139,7 @@ def test_plan_requests_its_own_token_budget(monkeypatch):
     captured = {}
 
     def fake_invoke_json(prompt, **kwargs):
+        """记录调用参数，用于断言规划请求了自己的 token 预算。"""
         captured.update(kwargs)
         return {"intent": "knowledge"}
 

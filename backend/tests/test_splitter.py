@@ -8,6 +8,7 @@ from splitter import split_markdown
 
 
 def test_pure_text_splits_into_text_chunks():
+    """纯文本按 chunk 大小切分，且所有块都被标记为 text。"""
     content = "\n".join(f"第{i}行内容" * 20 for i in range(200))
     chunks = split_markdown(content, chunk_size=200, chunk_overlap=20)
     assert len(chunks) > 1
@@ -15,6 +16,7 @@ def test_pure_text_splits_into_text_chunks():
 
 
 def test_pure_table_kept_whole():
+    """表格整块保留不打散；无标题无说明行时前缀为空，证据单元就是整张表。"""
     table = "| 型号 | 容量 |\n|---|---|\n| SC-100 | 100Ah |"
     chunks = split_markdown(table)
     assert len(chunks) == 1
@@ -27,6 +29,7 @@ def test_pure_table_kept_whole():
 
 
 def test_mixed_text_and_table():
+    """文本与表格共存：表格块前缀 = 最近标题 + 表格上方最近的非空非表格行。"""
     md = "## 概述\n这是文本。\n| A | B |\n|---|---|\n| 1 | 2 |\n结尾文字。"
     chunks = split_markdown(md)
     types = [chunk["type"] for chunk in chunks]
@@ -40,6 +43,7 @@ def test_mixed_text_and_table():
 
 
 def test_oversized_table_split_with_header():
+    """超长表格按行分段，每段都带完整表头且分隔行只出现一次。"""
     rows = [f"| 产品{i} | 数据{i} |" for i in range(30)]
     table = "| 产品 | 数据 |\n|---|---|\n" + "\n".join(rows)
     chunks = split_markdown(table, chunk_size=120)
@@ -52,6 +56,7 @@ def test_oversized_table_split_with_header():
 
 
 def test_oversized_header_kept_whole_with_warning(caplog):
+    """表头本身超限时放弃切分、整表保留，并留下 WARNING 日志（无表头则丢列语义）。"""
     header = "| " + "x" * 300 + " |"
     table = header + "\n| " + "y" * 50 + " |"
     with caplog.at_level(logging.WARNING, logger="splitter"):
@@ -63,6 +68,7 @@ def test_oversized_header_kept_whole_with_warning(caplog):
 
 
 def test_table_without_separator_line():
+    """缺少分隔行的表格（非标准 GFM）也能按行切分，不抛异常。"""
     table = "| 产品 | 数据 |\n| A | 1 |\n| B | 2 |"
     chunks = split_markdown(table, chunk_size=20)
     assert len(chunks) == 2
@@ -70,6 +76,7 @@ def test_table_without_separator_line():
 
 
 def test_text_chunk_start_line_mapping():
+    """文本块 start_line 换算正确且单调不减，末尾块行号大于首块。"""
     content = "标题行\n\n" + "\n".join(
         f"第{i}行：" + "这是一段很长很长的文本内容。" * 20 for i in range(50)
     )
@@ -83,6 +90,7 @@ def test_text_chunk_start_line_mapping():
 
 
 def test_table_start_line_after_text():
+    """表格块的 start_line 指向表头所在行（用于前端定位，不参与检索排序）。"""
     md = "第一行\n第二行\n| A | B |\n|---|---|\n| 1 | 2 |"
     chunks = split_markdown(md)
     table_chunk = next(chunk for chunk in chunks if chunk["type"] == "table")
@@ -90,6 +98,7 @@ def test_table_start_line_after_text():
 
 
 def _only_table(md: str, **kwargs) -> dict:
+    """断言输入只切出一张表并返回该块，供前缀类用例复用。"""
     chunks = split_markdown(md, **kwargs)
     tables = [chunk for chunk in chunks if chunk["type"] == "table"]
     assert len(tables) == 1
@@ -111,6 +120,7 @@ def test_caption_not_duplicated_when_line_above_is_heading():
 
 
 def test_table_at_document_start_has_no_prefix():
+    """文档开头即表格：没有标题可挂，前缀为空，证据单元行区间为表格自身。"""
     md = "| 项目 | 营收 |\n|---|---|\n| 动力电池 | 100 |"
     chunk = _only_table(md)
     assert chunk["content"] == md
@@ -125,6 +135,7 @@ def test_table_with_heading_only():
 
 
 def test_oversized_table_every_segment_carries_prefix():
+    """超长表格的每个分段都带前缀（每段都要能独立被检索到）。"""
     rows = [f"| 产品{i} | 数据{i} |" for i in range(30)]
     md = "## 产品参数表\n\n| 产品 | 数据 |\n|---|---|\n" + "\n".join(rows)
     table_chunks = [
@@ -177,6 +188,7 @@ def test_text_block_after_blank_line_belongs_to_its_own_section():
 
 
 def test_evidence_unit_expansion_returns_whole_table_from_any_segment():
+    """命中表格的任一分段，展开都能取回整张表；去重键只算一个证据单元。"""
     rows = [f"| 产品{i} | 数据{i} |" for i in range(40)]
     md = "## 参数表\n| 产品 | 数据 |\n|---|---|\n" + "\n".join(rows)
     doc_id = create_document("参数表.md", "product", source_content=md)
@@ -200,6 +212,7 @@ def test_evidence_unit_expansion_returns_whole_table_from_any_segment():
 
 
 def test_evidence_unit_expansion_truncates_around_hit():
+    """超长证据单元以命中行为中心截取，且不超字符上限（不切断行）。"""
     md = "\n".join(f"第{i}行的内容" for i in range(1, 101))
     doc_id = create_document("长文档.md", "common", source_content=md)
     text = expand_evidence_unit(doc_id, 1, 100, hit_start_line=80, max_chars=100)
@@ -209,4 +222,5 @@ def test_evidence_unit_expansion_truncates_around_hit():
 
 
 def test_evidence_unit_expansion_missing_document():
+    """文档不存在时返回空串，不抛异常（删除后残留引用的兜底）。"""
     assert expand_evidence_unit(9999, 1, 10, 1) == ""

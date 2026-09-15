@@ -84,6 +84,7 @@ def _run_task(doc_id: int) -> None:
 
 
 def _forget_future(future: Future) -> None:
+    """任务结束后从登记表移除，避免 _futures 无限增长（wait_idle 只看未完成任务）。"""
     with _futures_lock:
         _futures.discard(future)
 

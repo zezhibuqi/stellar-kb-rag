@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * 用户管理页（仅 admin）：创建账号、调整角色、重置密码、停用/启用与永久删除。
+ *
+ * 账号生命周期是两步的：停用（可恢复、用户名仍占用）→ 删除（不可恢复、用户名释放）。
+ * 页面对「自己」做了按钮级限制（不能改自己角色、不能停用/删除自己），
+ * 「最后一个管理员」等硬约束仍由后端兜底。
+ */
 import { PlusOutlined } from "@ant-design/icons";
 import {
   Badge,
@@ -29,6 +36,7 @@ import {
   type UserInfo,
 } from "@/lib/api";
 
+/** 角色下拉项（value 与后端 ROLE_VALUES 一致）。 */
 const ROLE_OPTIONS = [
   { value: "employee", label: "普通员工" },
   { value: "finance", label: "财务人员" },
@@ -37,6 +45,7 @@ const ROLE_OPTIONS = [
   { value: "admin", label: "系统管理员" },
 ];
 
+/** 用户管理页组件：自持用户列表与两个弹窗（新建、重置密码）的表单状态。 */
 export default function UsersPage() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -171,6 +180,7 @@ export default function UsersPage() {
   };
 
   const sortedUsers = [...users].sort(
+    // 启用账号排前面、停用账号沉底，便于管理员优先处理待删除的账号
     (a, b) => Number(b.is_active ?? 1) - Number(a.is_active ?? 1)
   );
 

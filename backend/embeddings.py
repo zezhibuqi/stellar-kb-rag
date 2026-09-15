@@ -20,9 +20,11 @@ class SiliconFlowEmbeddings(Embeddings):
     """LangChain Embeddings 适配器：复用 SiliconFlow BAAI/bge-m3 客户端。"""
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """LangChain 批量向量化入口，直接复用 SiliconFlow 实现。"""
         return embed_texts(texts)
 
     def embed_query(self, text: str) -> list[float]:
+        """LangChain 单条查询向量化入口（检索时调用）。"""
         return embed_texts([text])[0]
 
 
@@ -39,6 +41,10 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 
 def _embed_batch(texts: list[str]) -> list[list[float]]:
+    """单批请求 SiliconFlow /embeddings，失败按 1s、2s 退避重试至多 3 次。
+
+    返回结果按 API 的 index 字段排序，保证与入参顺序一致（否则向量会错配到文本上）。
+    """
     url = Config.SILICONFLOW_BASE_URL.rstrip("/") + "/embeddings"
     payload = {"model": "BAAI/bge-m3", "input": texts}
     headers = {"Authorization": f"Bearer {Config.SILICONFLOW_API_KEY}"}

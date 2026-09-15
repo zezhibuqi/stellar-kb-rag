@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * 会话列表（问答页侧边栏 / 窄屏抽屉）：
+ * 列表按最近更新倒序，支持新建、切换、二次确认删除，达到上限时禁用新建。
+ */
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { Button, Empty, List, Popconfirm, Tooltip, Typography, message } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -11,9 +15,11 @@ import {
   type ConversationInfo,
 } from "@/lib/api";
 
+/** 每用户会话上限，必须与后端 models.CONVERSATION_LIMIT 保持一致。 */
 const CONVERSATION_LIMIT = 5;
 
 interface Props {
+  /** 当前选中的会话 id（高亮用；null 表示还没选中）。 */
   activeId: number | null;
   onSelect: (id: number) => void;
   /** 列表加载完成（父组件据此自动选中最近更新的会话） */
@@ -24,6 +30,12 @@ interface Props {
   refreshToken?: number;
 }
 
+/**
+ * 会话列表组件。
+ *
+ * 刷新时机有两类：外部 refreshToken 变化（提问结束后标题/排序会变），
+ * 以及本组件内部的新建/删除操作。
+ */
 export default function ConversationList({
   activeId,
   onSelect,

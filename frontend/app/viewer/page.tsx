@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * 原文档查看页：按引用来源里的 doc_id 拉取 Markdown 全文，并定位到引用片段所在行。
+ *
+ * 定位策略有两级：优先用 remark 插件写入的 data-source-line 精确匹配行号，
+ * 匹配不到再退化为「按内容预览做文本搜索」。定位失败只影响滚动位置，不影响阅读。
+ */
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { Button, Spin, Tag, Typography } from "antd";
 import { useRouter } from "next/navigation";
@@ -9,6 +15,11 @@ import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 import { ApiRequestError, getDocRaw, type RawDoc } from "@/lib/api";
 
+/**
+ * remark 插件：把每个 mdast 节点的起始行号写成 data-source-line 属性。
+ *
+ * 渲染成 HTML 后即可用选择器直接找到对应行元素，实现「打开原文并高亮引用片段」。
+ */
 function addSourceLinePlugin() {
   return (tree: any) => {
     const visit = (node: any) => {
@@ -25,6 +36,7 @@ function addSourceLinePlugin() {
   };
 }
 
+/** 原文档查看页组件：参数来自查询串（doc_id / start_line / preview）。 */
 export default function ViewerPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);

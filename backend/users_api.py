@@ -25,6 +25,7 @@ users_bp = Blueprint("users", __name__, url_prefix="/api/users")
 @require_auth
 @require_admin
 def list_users_api():
+    """用户列表（仅 admin）：含 is_active，前端据此决定显示停用还是启用/删除。"""
     return jsonify(list_users())
 
 
@@ -32,6 +33,7 @@ def list_users_api():
 @require_auth
 @require_admin
 def create_user_api():
+    """创建用户（仅 admin）：用户名重复、密码过短、角色非法都由 models 层校验。"""
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
@@ -51,6 +53,7 @@ def create_user_api():
 @require_auth
 @require_admin
 def update_role_api(user_id: int):
+    """修改他人角色（仅 admin）：两条护栏——不能降级最后一个 admin、不能改自己。"""
     data = request.get_json(silent=True) or {}
     new_role = data.get("role")
     if new_role not in ROLE_VALUES:
@@ -120,6 +123,7 @@ def delete_user_api(user_id: int):
 @require_auth
 @require_admin
 def reset_password_api(user_id: int):
+    """管理员重置他人密码：token_version 自增，目标用户已签发的 token 全部失效。"""
     data = request.get_json(silent=True) or {}
     new_password = data.get("new_password") or ""
     target = get_user_by_id(user_id)

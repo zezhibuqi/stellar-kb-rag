@@ -4,6 +4,7 @@ from models import get_connection
 
 
 def test_chunk_index_created_and_trigram_search_hits_chinese():
+    """FTS5 + trigram 建表生效：中文子串（回收量）能 MATCH 到包含它的整句。"""
     conn = get_connection()
     conn.execute(
         "INSERT INTO chunk_index (content, doc_id, chunk_id, domain, filename, "
@@ -43,6 +44,7 @@ def test_missing_keyword_index_can_be_detected():
 
 
 def test_documents_have_keyword_indexed_at_column():
+    """documents 表有 keyword_indexed_at 列，回填与健康检查依赖它判断缺失。"""
     conn = get_connection()
     columns = {
         row["name"]

@@ -41,10 +41,17 @@ class ModelProvider:
 
     @property
     def configured(self) -> bool:
+        """密钥是否已配置；未配置的提供方在 /settings 页面禁用切换与测试。"""
         return bool(self.api_key)
 
 
 def _build_providers() -> dict[str, ModelProvider]:
+    """构造预设提供方注册表（id → ModelProvider）。
+
+    新增模型只改这里 + config.py/.env（模型标识直接写在 model 字段）；
+    能力标志（router_max_tokens / supports_response_format / supports_stream_usage /
+    agent_capable）必须按端点实测结果登记，不要靠运行时试错。
+    """
     providers = [
         ModelProvider(
             id="deepseek-v4f",
@@ -126,10 +133,12 @@ _clients: dict[str, OpenAI] = {}
 
 
 def list_providers() -> list[ModelProvider]:
+    """按注册顺序返回全部提供方（前端卡片顺序即此顺序）。"""
     return list(PROVIDERS.values())
 
 
 def get_provider(provider_id: str) -> ModelProvider | None:
+    """按 id 查提供方，不存在返回 None（接口层据此回 404）。"""
     return PROVIDERS.get(provider_id)
 
 
@@ -140,6 +149,10 @@ def get_active_provider() -> ModelProvider:
 
 
 def get_client(provider: ModelProvider | None = None) -> OpenAI:
+    """取（并缓存）OpenAI 兼容客户端；密钥缺失时抛 RuntimeError。
+
+    客户端按 provider.id 缓存复用，避免每次调用都新建连接池。
+    """
     if provider is None:
         provider = get_active_provider()
     if not provider.api_key:
@@ -194,6 +207,10 @@ def _record_usage(target: dict | None, response) -> None:
 def invoke(
     prompt: str, temperature: float | None = None, max_tokens: int | None = None
 ) -> str:
+    """非流式生成；返回空内容时显式报错（多为思考型模型推理耗尽 max_tokens）。
+
+    刻意不做「返回空字符串」的静默降级：空回答会被前端当成正常结果展示。
+    """
     if temperature is None:
         temperature = Config.LLM_TEMPERATURE
     if max_tokens is None:

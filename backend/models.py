@@ -289,6 +289,7 @@ def create_user(
 
 
 def get_user_by_username(username: str) -> dict[str, Any] | None:
+    """按用户名取用户（含 password_hash 与 token_version，供登录与改密校验用）。"""
     with transaction() as cur:
         row = cur.execute(
             "SELECT id, username, password_hash, display_name, role, is_active, "
@@ -300,6 +301,7 @@ def get_user_by_username(username: str) -> dict[str, Any] | None:
 
 
 def get_user_by_id(user_id: int) -> dict[str, Any] | None:
+    """按主键取用户（不含密码哈希）；认证装饰器与用户接口都走这里。"""
     with transaction() as cur:
         row = cur.execute(
             "SELECT id, username, display_name, role, is_active, token_version, created_at "
@@ -310,6 +312,7 @@ def get_user_by_id(user_id: int) -> dict[str, Any] | None:
 
 
 def list_users() -> list[dict[str, Any]]:
+    """全部用户，按 id 升序；is_active 统一转成 bool 供前端直接使用。"""
     with transaction() as cur:
         rows = cur.execute(
             "SELECT id, username, display_name, role, is_active, created_at "
@@ -321,6 +324,7 @@ def list_users() -> list[dict[str, Any]]:
 
 
 def update_user_role(user_id: int, role: str) -> bool:
+    """修改角色；非法角色抛 ValueError，返回是否命中记录。"""
     if role not in ROLE_VALUES:
         raise ValueError(f"非法角色：{role}")
     with transaction() as cur:
@@ -368,6 +372,7 @@ def reset_user_password(user_id: int, new_password: str) -> bool:
 
 
 def count_active_admins() -> int:
+    """当前可用（未停用）的 admin 数量，用于「不能停用最后一个管理员」的护栏。"""
     with transaction() as cur:
         row = cur.execute(
             "SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND is_active = 1"
@@ -376,12 +381,14 @@ def count_active_admins() -> int:
 
 
 def count_admins() -> int:
+    """admin 总数（含已停用），用于「不能降级最后一个管理员」的护栏。"""
     with transaction() as cur:
         row = cur.execute("SELECT COUNT(*) AS c FROM users WHERE role = 'admin'").fetchone()
         return int(row["c"])
 
 
 def get_allowed_domains(role: str) -> list[str]:
+    """角色可访问的知识领域；检索与原文接口都靠它做权限过滤。"""
     with transaction() as cur:
         rows = cur.execute(
             "SELECT domain_name FROM role_permissions WHERE role = ? ORDER BY domain_name",
@@ -418,6 +425,10 @@ def update_document_status(
     chunk_count: int | None = None,
     error_message: str | None = None,
 ) -> bool:
+    """更新灌库状态；传 chunk_count 时一并写入（成功路径），否则只写状态与错误信息。
+
+    失败态必须带 error_message，否则前端只能显示「灌库失败」而无法定位原因。
+    """
     if status not in DOCUMENT_STATUSES:
         raise ValueError(f"非法状态：{status}")
     with transaction() as cur:
@@ -435,6 +446,7 @@ def update_document_status(
 
 
 def get_document(doc_id: int) -> dict[str, Any] | None:
+    """取单篇文档（含 source_content 全文）；证据单元展开与原文接口的取数入口。"""
     with transaction() as cur:
         row = cur.execute(
             "SELECT id, filename, source_content, domain_name, chunk_count, "
@@ -446,6 +458,7 @@ def get_document(doc_id: int) -> dict[str, Any] | None:
 
 
 def list_documents(domain_name: str | None = None) -> list[dict[str, Any]]:
+    """文档列表；**不返回 source_content**（列表页不需要全文，避免响应体过大）。"""
     with transaction() as cur:
         if domain_name:
             rows = cur.execute(
@@ -462,6 +475,7 @@ def list_documents(domain_name: str | None = None) -> list[dict[str, Any]]:
 
 
 def delete_document(doc_id: int) -> bool:
+    """删除文档记录；对应向量与关键词索引由 docs_api 在同一请求内先行清理。"""
     with transaction() as cur:
         cur.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
         return cur.rowcount > 0
@@ -493,6 +507,7 @@ def set_setting(key: str, value: str) -> None:
 
 
 def count_conversations(user_id: int) -> int:
+    """本人会话数，用于创建前的上限校验。"""
     with transaction() as cur:
         row = cur.execute(
             "SELECT COUNT(*) AS c FROM conversations WHERE user_id = ?", (user_id,)
@@ -516,6 +531,7 @@ def create_conversation(user_id: int, title: str = "") -> int:
 
 
 def list_conversations(user_id: int) -> list[dict[str, Any]]:
+    """本人会话列表，按最近更新倒序（最近聊的排最前）。"""
     with transaction() as cur:
         rows = cur.execute(
             "SELECT id, title, created_at, updated_at FROM conversations "
@@ -526,6 +542,7 @@ def list_conversations(user_id: int) -> list[dict[str, Any]]:
 
 
 def get_conversation(conversation_id: int) -> dict[str, Any] | None:
+    """按 id 取会话（含 user_id）；归属校验由 conversations_api 负责。"""
     with transaction() as cur:
         row = cur.execute(
             "SELECT id, user_id, title, created_at, updated_at FROM conversations "
@@ -536,6 +553,7 @@ def get_conversation(conversation_id: int) -> dict[str, Any] | None:
 
 
 def update_conversation_title(conversation_id: int, title: str) -> bool:
+    """更新会话标题（首条提问的前 20 字），同时刷新 updated_at。"""
     with transaction() as cur:
         cur.execute(
             "UPDATE conversations SET title = ?, updated_at = CURRENT_TIMESTAMP "
@@ -570,6 +588,10 @@ def create_message(
     sources_json: str | None = None,
     trace_json: str | None = None,
 ) -> int:
+    """写入一条消息并返回 id；流式回答先以 status=streaming 落库再逐步补全。
+
+    sources_json / trace_json 由调用方序列化后传入，读取时由接口层还原成对象。
+    """
     if status not in MESSAGE_STATUSES:
         raise ValueError(f"非法消息状态：{status}")
     with transaction() as cur:
@@ -588,6 +610,7 @@ def update_message(
     sources_json: str | None = None,
     trace_json: str | None = None,
 ) -> bool:
+    """按需更新消息字段（只更新显式传入的部分）；四个字段都为空时直接返回 False。"""
     fields: list[str] = []
     params: list[Any] = []
     if content is not None:
@@ -613,6 +636,7 @@ def update_message(
 
 
 def get_message(message_id: int) -> dict[str, Any] | None:
+    """取单条消息（含 mode/status/sources_json/trace_json），用于状态回查。"""
     with transaction() as cur:
         row = cur.execute(
             "SELECT id, conversation_id, role, content, mode, status, "
@@ -623,6 +647,7 @@ def get_message(message_id: int) -> dict[str, Any] | None:
 
 
 def list_messages(conversation_id: int) -> list[dict[str, Any]]:
+    """按写入顺序取会话全部消息，供前端回放（含失败/中断的部分内容）。"""
     with transaction() as cur:
         rows = cur.execute(
             "SELECT id, role, content, mode, status, sources_json, trace_json, "

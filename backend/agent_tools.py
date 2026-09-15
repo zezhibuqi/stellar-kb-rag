@@ -36,6 +36,7 @@ def _candidate(
     parent_end_line,
     text,
 ) -> dict:
+    """把向量通道与关键词通道的不同来源统一成同一种候选结构（RRF 融合的前提）。"""
     return {
         "doc_id": doc_id,
         "chunk_id": chunk_id,
@@ -70,6 +71,7 @@ def rrf_fuse(channels: list[list[dict]], top_n: int, rrf_k: int | None = None) -
 
 
 def _row_from_document(document) -> dict:
+    """LangChain Document（重排结果）→ 候选 dict，metadata 缺失字段一律给安全默认值。"""
     meta = document.metadata or {}
     return _candidate(
         meta.get("doc_id"),
@@ -118,6 +120,12 @@ def build_knowledge_search(
     limit = candidates if candidates is not None else Config.AGENT_SEARCH_CANDIDATES
 
     def knowledge_search(query: str) -> dict:
+        """增强模式的知识检索工具：双通道召回 → RRF 融合 → 重排 → 证据单元展开去重。
+
+        角色在构建闭包时固化，调用方无法传入角色或领域；关键词通道失败时回退纯向量
+        并在 retrieval.keyword_status 里显式标记，避免「索引缺失」被误读成「没搜到」。
+        返回结构固定为 {status, items, retrieval}，命中/空都是数据而非异常。
+        """
         query = (query or "").strip()
         if not query:
             return {"status": STATUS_EMPTY, "items": [], "retrieval": {}}
@@ -237,6 +245,11 @@ def build_order_query(user_role: str):
     """订单查询工具：角色白名单 + 参数化 SQL（白名单校验在 order_qa 内）。"""
 
     def order_query(filters: dict | None = None, aggregation: str | None = None) -> dict:
+        """增强模式的订单查询工具：角色白名单 + 参数化 SQL。
+
+        「拒绝」与「空结果」同样作为数据返回（status=denied/empty），
+        让编排器能区分「越权」和「确实没有这条订单」，前者绝不能进入 LLM。
+        """
         if user_role not in order_qa.ORDER_ALLOWED_ROLES:
             return {
                 "status": STATUS_DENIED,

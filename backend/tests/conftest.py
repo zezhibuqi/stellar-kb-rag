@@ -62,6 +62,7 @@ def attach_chat_conversation(test_client):
     conversations: dict = {}
 
     def post(path, *args, **kwargs):
+        """透传请求；遇到未带 conversation_id 的 /api/chat 时按用户自动补一个会话。"""
         if path == "/api/chat":
             payload = kwargs.get("json")
             if isinstance(payload, dict) and "conversation_id" not in payload:

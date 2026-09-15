@@ -15,6 +15,7 @@ from conftest import attach_chat_conversation
 
 @pytest.fixture()
 def client():
+    """带会话自动补全的测试客户端：/api/chat 会自动带上一个已建会话。"""
     app = create_app()
     app.config["TESTING"] = True
     return attach_chat_conversation(app.test_client())
@@ -22,6 +23,7 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _mock_external(monkeypatch):
+    """把 Embedding、Reranker、LLM 与意图路由全部替身化：联调用例不外呼任何服务。"""
     monkeypatch.setattr(
         embeddings,
         "embed_texts",
@@ -43,16 +45,19 @@ def _mock_external(monkeypatch):
 
 
 def _login(client, username: str, password: str = "123456"):
+    """登录并返回原始响应（调用方自行断言）。"""
     return client.post(
         "/api/auth/login", json={"username": username, "password": password}
     )
 
 
 def _headers(token: str) -> dict:
+    """拼装 Bearer 认证头。"""
     return {"Authorization": f"Bearer {token}"}
 
 
 def _poll_doc(client, headers: dict, doc_id: int, timeout: float = 10.0):
+    """轮询灌库终态，超时直接抛断言错误。"""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         status = client.get(f"/api/docs/{doc_id}/status", headers=headers).get_json()
@@ -63,6 +68,7 @@ def _poll_doc(client, headers: dict, doc_id: int, timeout: float = 10.0):
 
 
 def test_local_full_journey(client):
+    """Stage 8 十步旅程：健康检查→建号→登录→上传→非流式→SSE→越权→删除，串成一条链路。"""
     # 健康检查
     health = client.get("/api/health").get_json()
     assert health["status"] in ("ok", "degraded")

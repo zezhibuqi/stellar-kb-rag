@@ -26,6 +26,7 @@ def owned_conversation(conversation_id: int) -> dict | None:
 
 
 def _loads(raw: str | None):
+    """把数据库里的 JSON 文本还原成对象；字段为空或损坏时返回 None（不抛异常）。"""
     if not raw:
         return None
     try:
@@ -51,12 +52,14 @@ def message_payload(message: dict) -> dict:
 @conversations_bp.get("/conversations")
 @require_auth
 def list_my_conversations():
+    """本人会话列表（按最近更新倒序），前端侧边栏据此渲染。"""
     return jsonify(list_conversations(g.user["id"]))
 
 
 @conversations_bp.post("/conversations")
 @require_auth
 def create_my_conversation():
+    """新建空会话；达到每用户上限时返回 400（CONVERSATION_LIMIT）。"""
     try:
         conversation_id = create_conversation(g.user["id"])
     except ValueError as exc:
@@ -67,6 +70,7 @@ def create_my_conversation():
 @conversations_bp.get("/conversations/<int:conversation_id>/messages")
 @require_auth
 def get_conversation_messages(conversation_id: int):
+    """回放本人会话消息；非本人一律 404（不暴露他人会话是否存在）。"""
     if owned_conversation(conversation_id) is None:
         return api_error("会话不存在", "NOT_FOUND", 404)
     return jsonify([message_payload(row) for row in list_messages(conversation_id)])
@@ -75,6 +79,7 @@ def get_conversation_messages(conversation_id: int):
 @conversations_bp.delete("/conversations/<int:conversation_id>")
 @require_auth
 def delete_my_conversation(conversation_id: int):
+    """删除本人会话；消息由外键级联删除（trace 与来源随之消失）。"""
     if owned_conversation(conversation_id) is None:
         return api_error("会话不存在", "NOT_FOUND", 404)
     delete_conversation(conversation_id)

@@ -8,6 +8,7 @@ from app import create_app
 
 @pytest.fixture()
 def client():
+    """独立的 Flask 测试客户端。"""
     app = create_app()
     app.config["TESTING"] = True
     return app.test_client()
@@ -32,6 +33,7 @@ def no_scnet_key():
 
 
 def _login(client, username: str, password: str = "123456"):
+    """登录并返回 JWT。"""
     resp = client.post(
         "/api/auth/login", json={"username": username, "password": password}
     )
@@ -40,10 +42,12 @@ def _login(client, username: str, password: str = "123456"):
 
 
 def _headers(token: str) -> dict:
+    """拼装 Bearer 认证头。"""
     return {"Authorization": f"Bearer {token}"}
 
 
 def test_settings_require_admin(client):
+    """模型设置三个接口都只对 admin 开放：非管理员访问返回 403。"""
     token = _login(client, "employee")
     for method, path in (
         (client.get, "/api/settings/model"),
@@ -55,6 +59,7 @@ def test_settings_require_admin(client):
 
 
 def test_get_model_settings_shape(client):
+    """设置响应结构固定：active/default + providers 列表，且字段集合精确匹配前端契约。"""
     token = _login(client, "admin")
     resp = client.get("/api/settings/model", headers=_headers(token))
     assert resp.status_code == 200
@@ -82,6 +87,7 @@ def test_get_model_settings_shape(client):
 
 
 def test_switch_rejects_unknown_provider(client):
+    """切换到不存在的提供方返回 404。"""
     token = _login(client, "admin")
     resp = client.put(
         "/api/settings/model",
@@ -92,6 +98,7 @@ def test_switch_rejects_unknown_provider(client):
 
 
 def test_switch_rejects_unconfigured_key(client, no_scnet_key):
+    """密钥未配置的提供方不可切换（400），且不会写入设置。"""
     token = _login(client, "admin")
     resp = client.put(
         "/api/settings/model",
@@ -106,6 +113,7 @@ def test_switch_rejects_unconfigured_key(client, no_scnet_key):
 
 
 def test_switch_persists_and_takes_effect(client, scnet_key):
+    """切换成功：响应与再次查询都指向新模型，llm.get_active_provider 同步生效。"""
     token = _login(client, "admin")
     resp = client.put(
         "/api/settings/model",
@@ -131,6 +139,7 @@ def test_switch_persists_and_takes_effect(client, scnet_key):
 
 
 def test_provider_test_success(client, scnet_key, monkeypatch):
+    """连通性测试成功：返回 ok 与模型回显。"""
     monkeypatch.setattr(llm, "test_provider", lambda provider: "pong")
     token = _login(client, "admin")
     resp = client.post(
@@ -145,7 +154,9 @@ def test_provider_test_success(client, scnet_key, monkeypatch):
 
 
 def test_provider_test_failure_returns_502(client, monkeypatch):
+    """连通性测试失败：返回 502 与 PROVIDER_TEST_FAILED，并把原因透给管理员。"""
     def raise_error(provider):
+        """替身：模拟端点连接超时。"""
         raise RuntimeError("连接超时")
 
     monkeypatch.setattr(llm, "test_provider", raise_error)

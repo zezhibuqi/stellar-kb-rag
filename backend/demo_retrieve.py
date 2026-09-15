@@ -7,6 +7,11 @@ from reranker import SiliconFlowReranker
 
 
 def main() -> None:
+    """离线检索演示：按角色做权限过滤 → 重排 → 打印 Top-N 文件名与内容预览。
+
+    用来在不启动后端的情况下快速验证「权限过滤 + 重排」的效果（会真实调用
+    SiliconFlow 的 Embedding 与 Reranker）。
+    """
     parser = argparse.ArgumentParser(description="离线检索演示（权限过滤 + Reranker）")
     parser.add_argument("--question", required=True, help="用户问题")
     parser.add_argument(

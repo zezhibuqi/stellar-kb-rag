@@ -14,6 +14,7 @@ from models import get_connection
 
 @pytest.fixture()
 def client():
+    """独立的 Flask 测试客户端（数据库由 conftest 重建）。"""
     app = create_app()
     app.config["TESTING"] = True
     return app.test_client()
@@ -30,16 +31,19 @@ def _mock_embeddings(monkeypatch):
 
 
 def _login(client, username: str = "admin", password: str = "123456") -> str:
+    """登录并返回 JWT。"""
     resp = client.post("/api/auth/login", json={"username": username, "password": password})
     assert resp.status_code == 200
     return resp.get_json()["token"]
 
 
 def _admin_headers(client) -> dict:
+    """以 admin 身份登录后的认证头。"""
     return {"Authorization": f"Bearer {_login(client)}"}
 
 
 def _upload(client, headers: dict, filename: str = "sample.md", domain: str = "finance", content: str = "line1\nline2\nline3"):
+    """以 multipart 形式上传一段 Markdown，返回原始响应。"""
     return client.post(
         "/api/upload",
         headers=headers,
@@ -52,6 +56,7 @@ def _upload(client, headers: dict, filename: str = "sample.md", domain: str = "f
 
 
 def _poll_status(client, headers: dict, doc_id: int, timeout: float = 10.0):
+    """轮询灌库状态直到 completed/failed；超时抛断言错误并带上观察到的状态序列。"""
     deadline = time.monotonic() + timeout
     statuses = []
     while time.monotonic() < deadline:
@@ -66,7 +71,9 @@ def _poll_status(client, headers: dict, doc_id: int, timeout: float = 10.0):
 
 
 def test_upload_status_flow_and_chunk_count(client, monkeypatch):
+    """上传返回 202(pending) → 轮询能看到 processing → 完成后 chunk_count 与列表一致。"""
     def slow_embed(texts):
+        """放慢向量化，保证测试能稳定观察到 processing 中间态。"""
         time.sleep(0.1)
         return [[0.1] * 1024 for _ in texts]
 
@@ -88,6 +95,7 @@ def test_upload_status_flow_and_chunk_count(client, monkeypatch):
 
 
 def test_upload_validations(client):
+    """上传校验：非 .md、未知领域、超过 10MB 分别返回 400/400/FILE_TOO_LARGE。"""
     headers = _admin_headers(client)
     assert _upload(client, headers, filename="notes.txt").status_code == 400
     assert _upload(client, headers, domain="unknown").status_code == 400
@@ -99,7 +107,9 @@ def test_upload_validations(client):
 
 
 def test_failure_sets_failed_with_error(client, monkeypatch):
+    """灌库抛异常时文档置 failed 且 error 字段带原始异常信息（故障可定位）。"""
     def broken_process(doc_id: int) -> None:
+        """替身流水线：直接抛错，模拟 Embedding 失败。"""
         raise RuntimeError("模拟灌库异常")
 
     monkeypatch.setattr(tasks, "_process_document", broken_process)
@@ -112,7 +122,9 @@ def test_failure_sets_failed_with_error(client, monkeypatch):
 
 
 def test_delete_during_processing_aborts(client, monkeypatch):
+    """在灌库途中删除文档：任务收尾时清理已写入向量，不留下孤儿数据。"""
     def slow_embed(texts):
+        """放慢向量化，为「删除发生在处理中」制造时间窗。"""
         time.sleep(0.8)
         return [[0.1] * 1024 for _ in texts]
 
@@ -141,17 +153,20 @@ def test_delete_during_processing_aborts(client, monkeypatch):
 
 
 def test_delete_missing_document_404(client):
+    """删除不存在的文档返回 404。"""
     headers = _admin_headers(client)
     resp = client.delete("/api/docs/99999", headers=headers)
     assert resp.status_code == 404
 
 
 def test_concurrent_uploads_max_three_workers(client, monkeypatch):
+    """并发上传时后台同时处理数不超过 3（线程池上限）。"""
     active = 0
     max_active = 0
     lock = __import__("threading").Lock()
 
     def slow_process(doc_id: int) -> None:
+        """替身流水线：睡眠 0.3s 并记录并发峰值，用于验证线程池上限为 3。"""
         nonlocal active, max_active
         with lock:
             active += 1
@@ -177,6 +192,7 @@ def test_concurrent_uploads_max_three_workers(client, monkeypatch):
 
 
 def test_raw_endpoint_permissions_and_content(client):
+    """原文接口：admin 可取全文，未登录 401，无权限领域 403，不存在 404，且列表不含全文。"""
     headers = _admin_headers(client)
     content = "## 测试\n原文内容。"
     resp = _upload(client, headers, content=content)
@@ -206,6 +222,7 @@ def test_raw_endpoint_permissions_and_content(client):
 
 
 def test_raw_endpoint_employee_allowed_domain(client):
+    """employee 访问 common 领域的原文应放行（403 只针对越权领域）。"""
     headers = _admin_headers(client)
     resp = _upload(client, headers, domain="common", content="公共内容")
     doc_id = resp.get_json()["doc_id"]
@@ -221,6 +238,7 @@ def test_raw_endpoint_employee_allowed_domain(client):
 
 
 def test_non_admin_forbidden_on_docs_apis(client):
+    """非管理员访问知识库管理接口（列表/上传/删除/状态）一律 403。"""
     token = _login(client, "employee")
     headers = {"Authorization": f"Bearer {token}"}
     assert client.get("/api/docs", headers=headers).status_code == 403
@@ -230,6 +248,7 @@ def test_non_admin_forbidden_on_docs_apis(client):
 
 
 def test_documents_list_filter_and_empty_domains(client):
+    """文档列表支持按领域过滤；无文档的领域返回空数组而不是报错。"""
     headers = _admin_headers(client)
     _upload(client, headers, domain="finance")
     _upload(client, headers, filename="handbook.md", domain="regulation", content="a\nb")

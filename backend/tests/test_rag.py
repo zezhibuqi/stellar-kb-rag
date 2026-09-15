@@ -16,6 +16,7 @@ from reranker import RerankerError
 
 @pytest.fixture()
 def client():
+    """带会话自动补全的测试客户端（本文件重点是问答本身，会话由 conftest 补齐）。"""
     app = create_app()
     app.config["TESTING"] = True
     return attach_chat_conversation(app.test_client())
@@ -37,6 +38,7 @@ def _default_knowledge_route(monkeypatch):
 
 
 def _login(client, username: str = "admin", password: str = "123456") -> str:
+    """登录并返回 JWT。"""
     resp = client.post(
         "/api/auth/login", json={"username": username, "password": password}
     )
@@ -45,6 +47,7 @@ def _login(client, username: str = "admin", password: str = "123456") -> str:
 
 
 def _headers(token: str) -> dict:
+    """拼装 Bearer 认证头。"""
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -66,10 +69,12 @@ def _seed_docs(monkeypatch, *items):
 
 
 def _identity_rerank(documents, query, top_n=5):
+    """重排替身：保持召回顺序（用例只关心上下文与来源组装）。"""
     return list(documents[:top_n])
 
 
 def _order_route(filters=None, aggregation=None, intent="order"):
+    """构造路由结果，供订单/混合意图用例直接替换 order_qa.route_question。"""
     return {
         "intent": intent,
         "filters": filters or {},
@@ -79,6 +84,7 @@ def _order_route(filters=None, aggregation=None, intent="order"):
 
 
 def test_non_stream_response_structure(monkeypatch, client):
+    """非流式响应结构：answer + sources，来源含文件名/领域/预览与定位字段。"""
     long_content = "2025年净利润为1688万元。" * 60
     _seed_docs(monkeypatch, (1, "finance", long_content))
     monkeypatch.setattr(rag, "rerank_top_n", _identity_rerank)
@@ -105,6 +111,7 @@ def test_non_stream_response_structure(monkeypatch, client):
 
 
 def test_stream_sse_format(monkeypatch, client):
+    """SSE 帧格式与结尾 done 事件：token 逐个下发，最后带 sources，头部禁止缓存。"""
     _seed_docs(monkeypatch, (1, "finance", "2025年净利润为1688万元。"))
     monkeypatch.setattr(rag, "rerank_top_n", _identity_rerank)
     monkeypatch.setattr(rag.llm, "stream", lambda *a, **k: iter(["你", "好"]))
@@ -131,6 +138,7 @@ def test_stream_sse_format(monkeypatch, client):
 
 
 def test_employee_cannot_get_finance_content(monkeypatch, client):
+    """越权检索：employee 问财务问题拿不到 finance 来源，admin 可以拿到。"""
     _seed_docs(
         monkeypatch,
         (1, "finance", "2025年净利润为1688万元。"),
@@ -160,6 +168,7 @@ def test_employee_cannot_get_finance_content(monkeypatch, client):
 
 
 def test_no_material_returns_fixed_answer(monkeypatch, client):
+    """检索为空时返回固定话术且不调用 LLM（sources 为空）。"""
     monkeypatch.setattr(rag, "search_with_permission", lambda *a, **k: [])
     token = _login(client)
     resp = client.post(
@@ -175,6 +184,7 @@ def test_no_material_returns_fixed_answer(monkeypatch, client):
 
 
 def test_reranker_failure_returns_500(monkeypatch, client):
+    """重排失败不降级：返回 500 与 RERANKER_ERROR，并落一条 failed 消息。"""
     monkeypatch.setattr(
         rag,
         "search_with_permission",
@@ -187,6 +197,7 @@ def test_reranker_failure_returns_500(monkeypatch, client):
     )
 
     def broken_rerank(*args, **kwargs):
+        """替身：抛 RerankerError。"""
         raise RerankerError("Reranker API 调用失败")
 
     monkeypatch.setattr(rag, "rerank_top_n", broken_rerank)
@@ -208,6 +219,7 @@ def test_history_included_in_prompt(monkeypatch, client):
     monkeypatch.setattr(rag, "rerank_top_n", _identity_rerank)
 
     def fake_invoke(prompt: str, **kwargs) -> str:
+        """记录提示词；首轮返回固定回答，便于断言历史被拼进第二轮提示词。"""
         captured["prompt"] = prompt
         calls["n"] += 1
         return "上一轮回答" if calls["n"] == 1 else "回答"
@@ -235,6 +247,7 @@ def test_history_included_in_prompt(monkeypatch, client):
 
 
 def test_order_route_unauthorized_returns_refusal(monkeypatch, client):
+    """纯订单意图越权：直接返回固定拒绝话术，绝不调用 LLM。"""
     monkeypatch.setattr(
         order_qa, "route_question", lambda q, history=None: _order_route(
             {"order_no": "DD20260315004"}
@@ -242,6 +255,7 @@ def test_order_route_unauthorized_returns_refusal(monkeypatch, client):
     )
 
     def fail_invoke(prompt, **kwargs):
+        """若被调用即说明越权保护失效。"""
         raise AssertionError("越权订单不应调用 LLM")
 
     monkeypatch.setattr(rag.llm, "invoke", fail_invoke)
@@ -259,6 +273,7 @@ def test_order_route_unauthorized_returns_refusal(monkeypatch, client):
 
 
 def test_order_route_authorized_hit(monkeypatch, client):
+    """有权限的订单查询：答案来自模型，来源标记为数据库来源。"""
     monkeypatch.setattr(
         order_qa, "route_question", lambda q, history=None: _order_route(
             {"order_no": "DD20260315004"}
@@ -282,6 +297,7 @@ def test_order_route_authorized_hit(monkeypatch, client):
 
 
 def test_order_route_no_result_fixed(monkeypatch, client):
+    """订单查不到结果：返回固定话术（不调用 LLM），来源里注明命中 0 条。"""
     monkeypatch.setattr(
         order_qa, "route_question", lambda q, history=None: _order_route(
             {"order_no": "DD99999999"}
@@ -289,6 +305,7 @@ def test_order_route_no_result_fixed(monkeypatch, client):
     )
 
     def fail_invoke(prompt, **kwargs):
+        """若被调用即说明「无结果也走 LLM」的约束被破坏。"""
         raise AssertionError("无结果订单不应调用 LLM")
 
     monkeypatch.setattr(rag.llm, "invoke", fail_invoke)
@@ -305,6 +322,7 @@ def test_order_route_no_result_fixed(monkeypatch, client):
 
 
 def test_mixed_unauthorized_returns_refusal_then_knowledge(monkeypatch, client):
+    """混合意图越权：订单部分给拒绝前缀，知识部分照常回答（来源只含向量来源）。"""
     monkeypatch.setattr(
         order_qa, "route_question", lambda q, history=None: _order_route(
             {"order_no": "DD20260315004"}, intent="mixed"
@@ -327,6 +345,7 @@ def test_mixed_unauthorized_returns_refusal_then_knowledge(monkeypatch, client):
 
 
 def test_mixed_authorized_sources_both(monkeypatch, client):
+    """混合意图有权限：来源同时包含 vector 与 database 两类。"""
     monkeypatch.setattr(
         order_qa, "route_question", lambda q, history=None: _order_route(
             {"order_no": "DD20260315004"}, intent="mixed"
@@ -349,6 +368,7 @@ def test_mixed_authorized_sources_both(monkeypatch, client):
 
 
 def test_mixed_order_no_result_with_knowledge(monkeypatch, client):
+    """混合意图但订单无结果：拼「未查询到订单」前缀后继续回答知识部分。"""
     monkeypatch.setattr(
         order_qa, "route_question", lambda q, history=None: _order_route(
             {"order_no": "DD99999999"}, intent="mixed"
@@ -371,6 +391,7 @@ def test_mixed_order_no_result_with_knowledge(monkeypatch, client):
 
 
 def test_router_fallback_prefix(monkeypatch, client):
+    """路由回退时加显式前缀，保证「没识别出订单问题」这件事对用户可见。"""
     monkeypatch.setattr(
         order_qa,
         "route_question",
@@ -396,6 +417,7 @@ def test_router_fallback_prefix(monkeypatch, client):
 
 
 def test_order_route_sse(monkeypatch, client):
+    """订单问答的流式路径：token 正常下发，done 事件里带数据库来源。"""
     monkeypatch.setattr(
         order_qa, "route_question", lambda q, history=None: _order_route(
             {"order_no": "DD20260315004"}

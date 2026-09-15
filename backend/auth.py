@@ -35,10 +35,18 @@ def create_token(
 
 
 def decode_token(token: str) -> dict:
+    """解码并校验 JWT（签名 + exp）；失败抛 jwt.PyJWTError，由调用方转成 401。"""
     return jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
 
 
 def require_auth(f):
+    """认证装饰器：校验 Bearer token 并把当前用户放进 `g.user`。
+
+    三类失败都返回 401，但 code 不同，便于前端区分处理：
+    UNAUTHORIZED（无/坏 token、用户已不存在）、ACCOUNT_DISABLED（账号被停用）、
+    TOKEN_STALE（改密/重置密码后 token_version 变化导致旧 token 失效）。
+    """
+
     @wraps(f)
     def wrapper(*args, **kwargs):
         header = request.headers.get("Authorization", "")
@@ -49,6 +57,7 @@ def require_auth(f):
             payload = decode_token(token)
         except jwt.PyJWTError:
             return api_error("登录已过期或 token 无效", "UNAUTHORIZED", 401)
+        # 用户信息每次请求都现查数据库：停用、删除、改角色即时生效，不依赖 token 内容
         user = get_user_by_id(payload["user_id"])
         if user is None:
             return api_error("用户不存在", "UNAUTHORIZED", 401)
@@ -63,6 +72,8 @@ def require_auth(f):
 
 
 def require_admin(f):
+    """管理员装饰器：必须叠加在 `@require_auth` 之内（依赖 g.user 已就绪）。"""
+
     @wraps(f)
     def wrapper(*args, **kwargs):
         if g.user.get("role") != "admin":
@@ -74,6 +85,11 @@ def require_admin(f):
 
 @auth_bp.post("/login")
 def login():
+    """登录：校验凭据并签发 JWT。
+
+    用户名不存在与密码错误返回同一句话（不暴露账号是否存在）；被停用账号单独
+    返回 403，让用户知道要找管理员而不是反复试密码。
+    """
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
@@ -100,6 +116,7 @@ def login():
 @auth_bp.get("/me")
 @require_auth
 def me():
+    """返回当前登录用户的身份信息（前端据此渲染导航与角色相关入口）。"""
     return jsonify(
         {
             "id": g.user["id"],

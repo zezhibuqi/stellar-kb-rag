@@ -48,6 +48,10 @@ def rerank_top_n(
 
 
 def format_history(history: list | None) -> str:
+    """把服务端截取的历史消息拼成「用户：…／助手：…」文本，供提示词复用。
+
+    历史只含已完成且有内容的最终问答，不含增强模式的子问题卡片（设计文档 2.7）。
+    """
     parts = []
     for msg in history or []:
         role = msg.get("role")
@@ -60,6 +64,11 @@ def format_history(history: list | None) -> str:
 
 
 def build_prompt(question: str, history: list | None, context: str) -> str:
+    """组装标准模式提示词；上下文里出现订单查询结果时切换为订单专用 System Prompt。
+
+    订单专用提示词的关键差异：明确「不得回答超出知识范围」、数值必须逐字引用，
+    避免模型把订单数据当成「没查到」而拒答。
+    """
     system = (
         ORDER_SYSTEM_PROMPT
         if "【订单数据库查询结果】" in context
@@ -72,6 +81,7 @@ def build_prompt(question: str, history: list | None, context: str) -> str:
 
 
 def build_sources(documents: Sequence) -> list[dict]:
+    """把召回文档转成前端引用来源结构（含 doc_id/行号，用于跳转原文定位）。"""
     return [
         {
             "source_type": "vector",
@@ -88,6 +98,7 @@ def build_sources(documents: Sequence) -> list[dict]:
 
 
 def _join_prefix(*parts: str) -> str:
+    """拼接多个前缀话术（如「越权提示」+「路由回退提示」），自动跳过空串。"""
     return "\n\n".join(part for part in parts if part)
 
 
@@ -95,6 +106,7 @@ def _fixed_answer(text: str, sources: list, stream: bool):
     """固定话术（越权/无结果/无资料），不调用 LLM，保持流式格式一致。"""
     if stream:
         def generate():
+            """按 SSE 事件序列输出固定话术与来源，形状与 LLM 生成路径完全一致。"""
             yield json.dumps({"token": text}, ensure_ascii=False)
             yield json.dumps({"done": True, "sources": sources}, ensure_ascii=False)
 
@@ -108,6 +120,7 @@ def _prefixed_llm_answer(
     """前缀 + LLM 生成（前缀先作为 token 输出）。"""
     if stream:
         def generate():
+            """先吐前缀（如越权提示），再逐 token 转发模型输出，最后发 done 事件。"""
             if prefix:
                 yield json.dumps({"token": prefix + "\n\n"}, ensure_ascii=False)
             tokens = (

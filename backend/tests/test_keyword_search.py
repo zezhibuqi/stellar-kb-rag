@@ -5,6 +5,7 @@ from models import create_document
 
 
 def _seed(domain="finance", filename="2025年度报告.md"):
+    """写入一段含「21万吨回收量」与释义表的文档并建索引，返回 doc_id。"""
     content = "\n".join(
         [
             "## 绿色低碳",
@@ -21,6 +22,7 @@ def _seed(domain="finance", filename="2025年度报告.md"):
 
 
 def test_split_terms_keeps_chinese_and_model_numbers():
+    """取词规则：中文连续段整体成词，英文数字（含 - .）保持完整（如 SC-500）。"""
     assert keyword_index.split_terms("SC-500 配套电芯 2025 年回收量") == [
         "SC-500",
         "配套电芯",
@@ -30,6 +32,7 @@ def test_split_terms_keeps_chinese_and_model_numbers():
 
 
 def test_match_finds_exact_sentence():
+    """三字以上中文词走 MATCH，命中包含该词的整句（21万吨 所在块）。"""
     doc_id = _seed()
     result = keyword_index.search("回收量")
     assert result["mode"] == "match"
@@ -64,6 +67,7 @@ def test_long_chinese_phrase_falls_back_to_short_terms():
 
 
 def test_domain_filter_applies_to_both_paths():
+    """MATCH 与 LIKE 两条路径都要做领域过滤（漏掉即越权）。"""
     _seed(domain="finance")
     assert keyword_index.search("回收量", domains=["product"])["rows"] == []
     assert keyword_index.search("回收量", domains=["finance"])["rows"] != []
@@ -72,6 +76,7 @@ def test_domain_filter_applies_to_both_paths():
 
 
 def test_backfill_is_idempotent_and_marks_documents():
+    """回填幂等：已入索引的文档不再重复处理；按标记判断而不是按内容。"""
     doc_id = _seed()
     assert keyword_index.missing_document_ids() == []
 

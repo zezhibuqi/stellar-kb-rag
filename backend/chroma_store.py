@@ -26,6 +26,11 @@ def reset() -> None:
 
 
 def get_collection():
+    """取（必要时创建）全局唯一的 Chroma 集合；加锁避免多线程半初始化。
+
+    灌库线程与请求线程会并发调用，未加锁时可能出现「client 已建、collection 仍为
+    None」的状态，导致后续调用拿到 None。
+    """
     global _client, _collection
     with _lock:
         if _client is None or _collection is None:
@@ -68,10 +73,12 @@ def upsert_chunks(
 
 
 def delete_by_doc_id(doc_id: int) -> None:
+    """按 doc_id 精确清理向量（重灌前清旧数据、删除文档时同步清理）。"""
     get_collection().delete(where={"doc_id": doc_id})
 
 
 def count_by_doc_id(doc_id: int) -> int:
+    """统计某文档的向量条数；灌库自检与测试断言用。"""
     result = get_collection().get(where={"doc_id": doc_id})
     return len(result["ids"])
 
@@ -91,12 +98,14 @@ def _langchain_collection() -> LangChainChroma:
 def similarity_search(
     query: str, k: int = 10, where: dict | None = None
 ) -> list[Document]:
+    """向量检索（标准模式入口）：where 传 `{"domain": {"$in": allowed}}` 做权限过滤。"""
     return _langchain_collection().similarity_search(query, k=k, filter=where)
 
 
 def similarity_search_with_scores(
     query: str, k: int = 10, where: dict | None = None
 ) -> list[tuple[Document, float]]:
+    """带相关性分数的向量检索；分数语义由底层集合的距离函数决定，仅用于比较。"""
     return _langchain_collection().similarity_search_with_relevance_scores(
         query, k=k, filter=where
     )

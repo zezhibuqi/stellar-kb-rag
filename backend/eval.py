@@ -18,9 +18,11 @@ class RAGPipelineForEval:
     """评测专用 RAG 管线：不做权限过滤，全领域检索。"""
 
     def __init__(self):
+        """固定 top_n=5，与线上标准模式的 RERANK_TOP_N 保持一致，避免口径漂移。"""
         self.reranker = SiliconFlowReranker(top_n=5)
 
     def retrieve(self, question: str) -> list[Document]:
+        """评测检索路径：全领域召回 k=10 → 重排取 5（**不做权限过滤**，评测专用）。"""
         candidates = chroma_store.similarity_search(question, k=10)
         reranked = self.reranker.compress_documents(candidates, question)
         return list(reranked)[:5]
@@ -68,6 +70,7 @@ def generate_report(
     golden_path: str,
     report_path: str,
 ) -> None:
+    """渲染 Markdown 评测报告：总体指标 + 分领域 + 未达标领域的改进计划。"""
     total_questions = sum(stats["total"] for stats in domain_stats.values())
     lines = [
         "# RAG 评测报告",
@@ -138,6 +141,10 @@ def generate_report(
 
 
 def main() -> None:
+    """命令行入口：读 Golden Set → 跑评测 → 写报告并打印 JSON 结果。
+
+    需要真实调用 SiliconFlow 的 Embedding 与 Reranker（不调用 LLM）。
+    """
     parser = argparse.ArgumentParser(description="RAG 检索质量评测")
     parser.add_argument("--golden", default="docs/golden_set.json")
     parser.add_argument("--report", default="docs/eval_report.md")

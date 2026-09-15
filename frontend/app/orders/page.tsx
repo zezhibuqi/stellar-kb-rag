@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * 订单数据页（仅 aftersale/admin）：只读的订单库浏览与筛选。
+ *
+ * 与「订单结构化问答」互补：这里是人工核对用的表格视图，联系方式由服务端脱敏；
+ * 筛选条件通过查询串传给后端白名单模板，非法值会被后端静默忽略。
+ */
 import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   Badge,
@@ -23,6 +29,7 @@ import {
   type OrderInfo,
 } from "@/lib/api";
 
+/** 产品型号下拉项（与后端 ALLOWED_PRODUCTS 一致）。 */
 const PRODUCT_OPTIONS = [
   { value: "SC-100", label: "SC-100" },
   { value: "SC-200", label: "SC-200" },
@@ -31,6 +38,7 @@ const PRODUCT_OPTIONS = [
   { value: "SC-500", label: "SC-500" },
 ];
 
+/** 支付方式下拉项（与后端 ALLOWED_PAYMENTS 一致）。 */
 const PAYMENT_OPTIONS = [
   { value: "支付宝", label: "支付宝" },
   { value: "微信支付", label: "微信支付" },
@@ -38,11 +46,13 @@ const PAYMENT_OPTIONS = [
   { value: "对公转账", label: "对公转账" },
 ];
 
+/** 订单状态下拉项：状态由 completed_at 是否为空推导。 */
 const STATUS_OPTIONS = [
   { value: "completed", label: "已完成" },
   { value: "pending", label: "未完成" },
 ];
 
+/** 页面内维护的筛选条件（空值表示不加该条件）。 */
 interface Filters {
   order_no?: string;
   customer_name?: string;
@@ -53,6 +63,7 @@ interface Filters {
   created_to?: string;
 }
 
+/** 订单数据页组件：自持分页与筛选条件，任一变化都会重新拉取。 */
 export default function OrdersPage() {
   const [data, setData] = useState<{ items: OrderInfo[]; total: number }>({
     items: [],
@@ -83,6 +94,7 @@ export default function OrdersPage() {
   }, [load, page, pageSize, filters]);
 
   const handleSearch = () => {
+    // 日期范围取 RangePicker 的两个端点，格式化成后端要求的 YYYY-MM-DD（含当天）
     const values = form.getFieldsValue();
     const range = values.range as [Dayjs, Dayjs] | undefined;
     setFilters({

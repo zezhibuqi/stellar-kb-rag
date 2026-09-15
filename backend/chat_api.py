@@ -34,6 +34,7 @@ SUPPORTED_MODES = ("standard", "enhanced")
 
 
 def _sse(payload: dict) -> str:
+    """把事件序列化成 SSE 帧（`data: {...}\\n\\n`），统一出口保证格式一致。"""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
@@ -45,6 +46,10 @@ def _finalize(
     status: str,
     trace: dict | None = None,
 ) -> None:
+    """流结束时落库：拼接已产出的 token、写入来源与 trace、更新消息状态并刷新会话时间。
+
+    无论正常结束、失败还是客户端中断都会走到这里，保证「已生成的部分内容不丢」。
+    """
     update_message(
         message_id,
         content="".join(parts),
@@ -58,6 +63,12 @@ def _finalize(
 @chat_bp.post("/chat")
 @require_auth
 def chat():
+    """问答主入口（设计文档 6.2 / 6.9）：校验 → 落库用户消息 → 生成 → 落库助手消息。
+
+    模式约束：enhanced 仅支持流式，且要求当前模型具备 agent_capable；
+    上下文由服务端从 messages 表截取（前端不再传 history）。
+    非流式直接返回完整结果，流式返回 SSE（首帧带 assistant 消息 id 供前端续写）。
+    """
     data = request.get_json(silent=True) or {}
     question = (data.get("question") or "").strip()
     if not question:
@@ -129,6 +140,7 @@ def chat():
     )
 
     def generate():
+        """SSE 生成器：转发编排/标准链路事件，同时累积 token 与来源用于落库。"""
         parts: list[str] = []
         sources: list = []
         status = "aborted"

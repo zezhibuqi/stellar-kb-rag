@@ -24,6 +24,11 @@ class SiliconFlowReranker(BaseDocumentCompressor):
         query: str,
         callbacks=None,
     ) -> Sequence[Document]:
+        """调用 SiliconFlow /rerank 重排并返回 Top-N（保持原 Document 与 metadata）。
+
+        空输入直接返回空列表（不发起网络请求）；其余异常一律抛 RerankerError，
+        由上层转成 HTTP 500 —— 检索链路刻意不做「跳过重排」的静默降级。
+        """
         if not documents:
             return []
         if not Config.SILICONFLOW_API_KEY:

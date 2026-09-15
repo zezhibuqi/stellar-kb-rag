@@ -25,6 +25,7 @@ MAX_PAGE_SIZE = 100
 
 
 def _clamp_int(value, default: int, minimum: int, maximum: int) -> int:
+    """把查询串参数夹到合法区间；非数字（含空值）一律回退默认值，不报错。"""
     try:
         return max(minimum, min(int(value), maximum))
     except (TypeError, ValueError):
@@ -34,6 +35,11 @@ def _clamp_int(value, default: int, minimum: int, maximum: int) -> int:
 @orders_bp.get("")
 @require_auth
 def list_orders():
+    """订单列表（aftersale/admin）：过滤 + 分页 + 联系方式脱敏 + 状态推导。
+
+    非法枚举与非法日期一律「丢弃该条件」而不报错——查询串由人手拼，静默忽略比 400
+    更符合筛选器的使用习惯；真正的权限问题在入口处以 403 拦截。
+    """
     if g.user["role"] not in ORDER_ALLOWED_ROLES:
         return api_error("无权限查看订单数据", "FORBIDDEN", 403)
 

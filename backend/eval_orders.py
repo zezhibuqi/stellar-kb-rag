@@ -16,6 +16,7 @@ TARGET_ROUTE_ACCURACY = 0.90
 
 
 def _norm(text: str) -> str:
+    """答案归一化：去掉千分位、空白与货币/标点符号，便于金额与日期的宽松比对。"""
     return re.sub(r"[,\s，。、元￥¥]", "", text or "")
 
 
@@ -33,6 +34,11 @@ def check_answer(expected, mode: str, answer: str) -> bool:
 
 
 def evaluate(golden: list[dict]) -> dict:
+    """跑完整评测：逐条真实路由 + 真实 SQL 问答，统计答案正确率与路由混淆矩阵。
+
+    每条都调用一次 LLM（路由）与一次生成，耗时较长且消耗额度；
+    role 取自 Golden Set，便于覆盖不同权限角色。
+    """
     route_hit = 0
     answer_hit = 0
     per_type: dict[str, dict] = {}
@@ -72,10 +78,12 @@ def evaluate(golden: list[dict]) -> dict:
 
 
 def _confusion_value(matrix: dict, expected: str, actual: str) -> int:
+    """读混淆矩阵单元格，缺失按 0 处理（避免报告渲染时 KeyError）。"""
     return matrix.get(expected, {}).get(actual, 0)
 
 
 def generate_report(golden_path: str, results: dict, report_path: str) -> None:
+    """渲染订单评测报告，并标注评测当时的模型名（多模型对比实验的前提）。"""
     total_items = sum(value["total"] for value in results["per_type"].values())
     seed_count = get_connection().execute("SELECT COUNT(*) FROM orders").fetchone()[0]
     active = llm.get_active_provider()
@@ -143,6 +151,7 @@ def generate_report(golden_path: str, results: dict, report_path: str) -> None:
 
 
 def main() -> None:
+    """命令行入口：读订单 Golden Set → 评测 → 写报告。"""
     parser = argparse.ArgumentParser(description="订单结构化问答评测")
     parser.add_argument("--golden", default="docs/golden_orders.json")
     parser.add_argument("--report", default="docs/eval_orders_report.md")

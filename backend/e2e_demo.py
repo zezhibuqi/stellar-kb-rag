@@ -16,6 +16,7 @@ BASE = "http://127.0.0.1:5000"
 
 
 def _check(name: str, condition: bool, extra: str = "") -> None:
+    """打印一步联调结果；失败立即退出（exit 1），保证脚本可作为 CI/验收门禁。"""
     status = "PASS" if condition else "FAIL"
     print(f"[{status}] {name}" + (f" | {extra}" if extra else ""))
     if not condition:
@@ -23,6 +24,11 @@ def _check(name: str, condition: bool, extra: str = "") -> None:
 
 
 def main() -> None:
+    """本地全流程联调：健康检查 → 建用户 → 上传灌库 → 问答（非流式/SSE）→ 越权 → 删除。
+
+    依赖后端已在 127.0.0.1:5000 运行；上传的文件默认取
+    backend/markdown_src/common/企业文化与价值观手册.md，可用 --file/--domain 覆盖。
+    """
     parser = argparse.ArgumentParser(description="本地端到端联调")
     parser.add_argument(
         "--file",

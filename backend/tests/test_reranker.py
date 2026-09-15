@@ -9,16 +9,21 @@ from reranker import SiliconFlowReranker
 
 
 class _FakeResponse:
+    """requests.Response 的最小替身：只实现被测代码用到的三个成员。"""
+
     def __init__(self, status_code: int, data: dict):
+        """按入参构造假响应。"""
         self.status_code = status_code
         self._json = data
         self.text = str(data)
 
     def json(self):
+        """返回预置数据（等价于 requests.Response.json()）。"""
         return self._json
 
 
 def _docs() -> list[Document]:
+    """构造 5 条带 doc_id/domain/filename 的文档，便于断言重排后 metadata 未丢。"""
     return [
         Document(
             page_content=f"内容{i}",
@@ -29,7 +34,9 @@ def _docs() -> list[Document]:
 
 
 def test_reranker_orders_by_score_and_keeps_metadata(monkeypatch):
+    """按 relevance_score 降序取 top_n，且文档内容与 metadata 原样保留。"""
     def fake_post(url, json=None, headers=None, timeout=None):
+        """伪造 rerank 接口：故意返回乱序结果，验证客户端自己排序。"""
         assert json["model"] == "BAAI/bge-reranker-v2-m3"
         assert json["top_n"] == 3
         return _FakeResponse(
@@ -54,7 +61,9 @@ def test_reranker_orders_by_score_and_keeps_metadata(monkeypatch):
 
 
 def test_reranker_failure_raises(monkeypatch):
+    """非 200 一律抛 RerankerError（含状态码），由上层转 500，不做静默降级。"""
     def bad_post(*args, **kwargs):
+        """伪造 500 响应。"""
         return _FakeResponse(500, {})
 
     monkeypatch.setattr(requests, "post", bad_post)
@@ -64,10 +73,12 @@ def test_reranker_failure_raises(monkeypatch):
 
 
 def test_reranker_empty_documents():
+    """空输入直接返回空列表，不发起网络请求（也避免 API 报参数错误）。"""
     assert SiliconFlowReranker().compress_documents([], "查询") == []
 
 
 def test_reranker_requires_api_key(monkeypatch):
+    """密钥未配置时给出明确错误，而不是发出必然 401 的请求。"""
     monkeypatch.setattr(Config, "SILICONFLOW_API_KEY", "")
     with pytest.raises(RuntimeError, match="SILICONFLOW_API_KEY"):
         SiliconFlowReranker().compress_documents(_docs(), "查询")

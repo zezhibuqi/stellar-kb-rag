@@ -1,3 +1,13 @@
+/**
+ * 全局样式与主题变量。
+ *
+ * 主题分工：颜色 token 主要交给 antd（见 ThemeProvider 的 ConfigProvider），
+ * 这里只定义 antd 覆盖不到的自定义元素（聊天气泡、来源列表、Markdown 排版等）
+ * 所需的 CSS 变量，通过 [data-theme="dark"] 整体切换。
+ *
+ * 分区：主题变量 → 基础重置与滚动条 → 通用卡片与页头 → 聊天 → 引用来源 →
+ * Markdown 排版 → 原文档查看。
+ */
 :root {
   --app-bg: #f6f7f9;
   --app-panel: #ffffff;

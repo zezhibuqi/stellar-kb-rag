@@ -170,6 +170,12 @@ def _table_prefix(block: dict) -> str:
 def _process_blocks(
     blocks: list[dict], chunk_size: int, chunk_overlap: int
 ) -> list[dict]:
+    """把标注好的块切成最终 chunk 列表，并补上下文前缀与证据单元行区间。
+
+    文本块与表格块的区别：文本块第 2 段起补最近标题（第 1 段本就含标题）；
+    表格块每一段（含超长表拆出的多段）都要补「标题 + 表名/单位」前缀，
+    因为每段都必须能独立被检索到。
+    """
     result: list[dict] = []
     section_text_seen: dict[int, int] = {}
 
@@ -204,6 +210,11 @@ def _process_blocks(
 def _split_text(
     content: str, chunk_size: int, chunk_overlap: int, block_start_line: int
 ) -> list[dict]:
+    """按 chunk_size/overlap 切文本，并把块内偏移换算回原文行号（1-indexed）。
+
+    行号换算用「上一段结束位置 - overlap」作为查找起点，兼容重叠切块时文本
+    在块内重复出现的情况，避免定位漂移。
+    """
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
@@ -224,6 +235,11 @@ def _split_text(
 
 
 def _split_table(content: str, chunk_size: int, block_start_line: int) -> list[dict]:
+    """切表格：不超过 chunk_size 整块保留；超限则每段都带完整表头（含分隔行）。
+
+    表头本身超过 chunk_size 时放弃切分并记警告——没有表头的表格片段会失去
+    列语义，宁可让这一块超长。
+    """
     if len(content) <= chunk_size:
         return [{"type": "table", "content": content, "start_line": block_start_line}]
 

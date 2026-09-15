@@ -10,6 +10,11 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 
 def _resolve(value: str) -> str:
+    """把配置里的相对路径解析成基于项目根目录的绝对路径。
+
+    .env 里写 `./backend/data/app.db` 时，进程的工作目录可能是 backend/ 也可能是
+    仓库根目录；统一按 PROJECT_ROOT 解析，避免两种启动方式读到不同的库。
+    """
     path = Path(value)
     return str(path if path.is_absolute() else (PROJECT_ROOT / path).resolve())
 

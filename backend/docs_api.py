@@ -19,6 +19,7 @@ docs_bp = Blueprint("docs", __name__, url_prefix="/api")
 
 
 def _decode_markdown_bytes(data: bytes) -> str:
+    """按 UTF-8 优先、GB18030 兜底解码上传文件（Windows 用户常见 GBK 编码）。"""
     for encoding in ("utf-8", "gb18030"):
         try:
             return data.decode(encoding)
@@ -31,6 +32,7 @@ def _decode_markdown_bytes(data: bytes) -> str:
 @require_auth
 @require_admin
 def list_docs():
+    """文档列表（仅 admin），可按 domain 过滤；不返回全文，避免响应体过大。"""
     domain = (request.args.get("domain") or "").strip() or None
     rows = list_documents(domain)
     return jsonify(
@@ -52,6 +54,11 @@ def list_docs():
 @require_auth
 @require_admin
 def upload_doc():
+    """上传 Markdown：先落 documents 记录（pending）再提交后台灌库，立即返回 doc_id。
+
+    同步只做「解码 + 入库 + 提交任务」，耗时的向量化放在线程池里跑，避免请求超时；
+    前端通过 /docs/:id/status 轮询进度。
+    """
     file = request.files.get("file")
     domain = (request.form.get("domain") or "").strip()
     if file is None or not file.filename:
@@ -88,6 +95,7 @@ def upload_doc():
 @require_auth
 @require_admin
 def doc_status(doc_id: int):
+    """查询灌库进度；失败时附带 error 字段（前端直接展示失败原因）。"""
     doc = get_document(doc_id)
     if doc is None:
         return api_error("文档不存在", "NOT_FOUND", 404)
@@ -105,6 +113,10 @@ def doc_status(doc_id: int):
 @require_auth
 @require_admin
 def delete_doc(doc_id: int):
+    """删除文档：按顺序清理 Chroma 向量 → 关键词索引 → SQLite 记录。
+
+    三处必须同步清理：漏掉关键词索引会留下「幽灵命中」（检索到已删除文档的块）。
+    """
     doc = get_document(doc_id)
     if doc is None:
         return api_error("文档不存在", "NOT_FOUND", 404)
@@ -122,6 +134,10 @@ def delete_doc(doc_id: int):
 @docs_bp.get("/docs/<int:doc_id>/raw")
 @require_auth
 def doc_raw(doc_id: int):
+    """返回原文档全文（Markdown）：所有登录用户都可请求，但按角色领域校验。
+
+    越权返回 403 而非 404 —— 引用来源里已经出现文件名，没有必要隐藏文档是否存在。
+    """
     doc = get_document(doc_id)
     if doc is None:
         return api_error("文档不存在", "NOT_FOUND", 404)

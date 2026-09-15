@@ -32,6 +32,7 @@ LATENCY_PROMPT = (
 
 
 def _mean(values: list[float]) -> float | None:
+    """算术平均并保留 3 位小数；无样本返回 None（报告里显示为「评测失败」）。"""
     return round(sum(values) / len(values), 3) if values else None
 
 
@@ -78,10 +79,12 @@ def evaluate_provider(provider_id: str, golden_orders: list[dict], latency_runs:
 
 
 def _pct(value: float | None) -> str:
+    """百分比单元格格式；None 表示该模型没跑出结果。"""
     return f"{value:.2%}" if value is not None else "评测失败"
 
 
 def _sec(value: float | None) -> str:
+    """秒数单元格格式；None 表示没有有效样本。"""
     return f"{value:.2f}s" if value is not None else "-"
 
 
@@ -93,6 +96,11 @@ def build_report(
     golden_orders_path: str,
     golden_retrieval_path: str,
 ) -> str:
+    """渲染多模型对比表：订单正确率/路由准确率/检索对照/首 token 与总延迟。
+
+    检索指标与所用 LLM 无关（管线里没有 LLM），表里标注为对照组；
+    未配置密钥的提供方单列一节，避免读者误以为它们评测失败。
+    """
     hit_rate_cell = (
         f"{retrieval_overall['hit_rate']:.2%}" if retrieval_overall else "未执行"
     )
@@ -145,6 +153,7 @@ def build_report(
 
 
 def _load_checkpoint(path: str) -> dict[str, dict]:
+    """读取断点文件（provider_id → 结果）；缺失或损坏时返回空，等价于从头跑。"""
     data_path = Path(path)
     if not data_path.exists():
         return {}
@@ -156,6 +165,7 @@ def _load_checkpoint(path: str) -> dict[str, dict]:
 
 
 def _save_checkpoint(path: str, results: list[dict]) -> None:
+    """写断点：每评完一个提供方就落盘，中断后重跑可跳过已完成的模型。"""
     data_path = Path(path)
     data_path.parent.mkdir(parents=True, exist_ok=True)
     data_path.write_text(
@@ -164,6 +174,11 @@ def _save_checkpoint(path: str, results: list[dict]) -> None:
 
 
 def main() -> None:
+    """命令行入口：逐提供方评订单问答与延迟，最后补一次检索对照并写报告。
+
+    会临时改写 app_settings.llm_provider，结束时在 finally 中恢复原值；
+    未配置密钥的提供方只登记、不评测。
+    """
     parser = argparse.ArgumentParser(description="多模型对比评测")
     parser.add_argument("--golden-orders", default="docs/golden_orders.json")
     parser.add_argument("--golden-retrieval", default="docs/golden_set.json")
@@ -187,6 +202,7 @@ def main() -> None:
     original = get_setting(llm.SETTING_KEY)
 
     def restore():
+        """恢复评测前的当前模型设置（被打断也要保证设置不残留）。"""
         set_setting(llm.SETTING_KEY, original or llm.DEFAULT_PROVIDER_ID)
 
     try:
@@ -244,6 +260,7 @@ def main() -> None:
 
 
 def _chroma_count() -> int:
+    """Chroma 向量总数；为 0 时跳过检索对照（未灌库环境下评测无意义）。"""
     import chroma_store
 
     return int(chroma_store.get_collection().count())

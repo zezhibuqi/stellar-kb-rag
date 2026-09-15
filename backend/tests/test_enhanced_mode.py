@@ -14,12 +14,14 @@ from config import Config
 
 @pytest.fixture()
 def client():
+    """独立的 Flask 测试客户端。"""
     app = create_app()
     app.config["TESTING"] = True
     return app.test_client()
 
 
 def _login(client, username="admin", password="123456"):
+    """登录并返回 JWT。"""
     resp = client.post(
         "/api/auth/login", json={"username": username, "password": password}
     )
@@ -28,14 +30,17 @@ def _login(client, username="admin", password="123456"):
 
 
 def _headers(token):
+    """拼装 Bearer 认证头。"""
     return {"Authorization": f"Bearer {token}"}
 
 
 def _new_conversation(client, token) -> int:
+    """新建会话并返回 id（V2.0 起问答必须挂在会话上）。"""
     return client.post("/api/conversations", headers=_headers(token)).get_json()["id"]
 
 
 def _plan() -> dict:
+    """构造一个「需要拆解、单子问题」的规划结果。"""
     return {
         "needs_decomposition": True,
         "intent": "knowledge",
@@ -56,6 +61,7 @@ def _plan() -> dict:
 
 
 def _sub_results() -> list[dict]:
+    """构造一条已完成的子问题结果（含一条表格证据）。"""
     return [
         {
             "id": 1,
@@ -85,6 +91,7 @@ def _sub_results() -> list[dict]:
 
 
 def test_enhanced_requires_capable_model(monkeypatch, client):
+    """当前模型没有 agent_capable 时，enhanced 请求返回 400 MODE_UNAVAILABLE（不暗中换模型）。"""
     monkeypatch.setattr(
         llm, "get_active_provider", lambda: SimpleNamespace(agent_capable=False)
     )
@@ -105,6 +112,7 @@ def test_enhanced_requires_capable_model(monkeypatch, client):
 
 
 def test_enhanced_requires_stream(monkeypatch, client):
+    """增强模式只支持流式：stream=false 返回 400 MODE_REQUIRES_STREAM。"""
     monkeypatch.setattr(
         llm, "get_active_provider", lambda: SimpleNamespace(agent_capable=True)
     )
@@ -125,6 +133,7 @@ def test_enhanced_requires_stream(monkeypatch, client):
 
 
 def test_unknown_mode_rejected(client):
+    """未知 mode 值同样按 MODE_UNAVAILABLE 处理（不静默退回标准模式）。"""
     token = _login(client)
     conversation_id = _new_conversation(client, token)
     resp = client.post(
@@ -142,6 +151,7 @@ def test_unknown_mode_rejected(client):
 
 
 def test_enhanced_stream_emits_stage_events_and_persists_trace(monkeypatch, client):
+    """SSE 事件序列（planning/planned/sub_answer/synthesizing）+ trace 与来源落库。"""
     monkeypatch.setattr(
         llm, "get_active_provider", lambda: SimpleNamespace(agent_capable=True)
     )
@@ -182,6 +192,7 @@ def test_enhanced_stream_emits_stage_events_and_persists_trace(monkeypatch, clie
 
 
 def test_planner_fallback_prefixes_and_keeps_standard_answer(monkeypatch, client):
+    """规划失败：加显式前缀后走标准模式单跳，trace 标记 fallback。"""
     monkeypatch.setattr(
         llm, "get_active_provider", lambda: SimpleNamespace(agent_capable=True)
     )
@@ -334,6 +345,7 @@ def _consume(monkeypatch, plan, sub_results, *, question="问题", role="admin",
 
 
 def _order_denied_plan():
+    """构造「只有一个订单子问题」的规划（用于验证越权短路）。"""
     return {
         "needs_decomposition": True,
         "intent": "order",
@@ -366,6 +378,7 @@ def test_all_order_denied_returns_fixed_answer_without_llm(monkeypatch):
     }
 
     def forbidden(*args, **kwargs):
+        """替身：一旦被调用即说明越权保护失效。"""
         raise AssertionError("全部订单子问题被拒绝时不得调用 LLM")
 
     trace: dict = {}
@@ -392,6 +405,7 @@ def test_all_sub_answers_failed_falls_back_to_standard(monkeypatch):
     )
 
     def forbidden(*args, **kwargs):
+        """替身：全部子答案失败时不应进入合成调用。"""
         raise AssertionError("全部子答案失败时不应进入合成调用")
 
     trace: dict = {}
@@ -423,6 +437,7 @@ def test_decomposition_without_sub_questions_falls_back(monkeypatch):
     )
 
     def forbidden(*args, **kwargs):
+        """替身：空子问题列表不得进入合成调用。"""
         raise AssertionError("空子问题列表不得进入合成调用")
 
     trace: dict = {}
@@ -466,6 +481,7 @@ def test_total_budget_exhausted_skips_round_two(monkeypatch):
     }
 
     def answer(*args, **kwargs):
+        """替身：返回一个成功的子问题结果，同时把假时钟推到预算之外。"""
         clock["t"] = 2000.0  # 第一轮把 100s 预算耗尽
         item = orchestrator._base_result(plan["sub_questions"][0])
         item["answer"] = "SC-300"
@@ -502,6 +518,7 @@ def test_trace_records_model_timings_and_usage(monkeypatch):
     item["elapsed_ms"] = 1234
 
     def fake_stream(prompt, **kwargs):
+        """替身：往 usage 出口写入用量并返回一个 token，验证 trace 采集。"""
         kwargs["usage"].update(
             {"prompt_tokens": 500, "completion_tokens": 50, "total_tokens": 550}
         )

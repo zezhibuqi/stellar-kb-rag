@@ -4,6 +4,7 @@ import orchestrator
 
 
 def _result(qid, coverage="sufficient", answer="答案", evidence=None, error=None):
+    """构造一条子问题结果（结构对齐 orchestrator._base_result）。"""
     return {
         "id": qid,
         "query": f"子问题{qid}",
@@ -19,6 +20,7 @@ def _result(qid, coverage="sufficient", answer="答案", evidence=None, error=No
 
 
 def _evidence():
+    """构造一条表格证据单元（含行区间与原文）。"""
     return [
         {
             "doc_id": 1,
@@ -32,6 +34,7 @@ def _evidence():
 
 
 def test_prompt_contains_each_sub_question_with_evidence():
+    """合成提示词包含每个子问题的编号/状态/子答案与依据原文，缺项写明证据缺失。"""
     prompt = orchestrator.build_synthesis_prompt(
         "2025 年经营情况如何？",
         [_result(1, evidence=_evidence()), _result(2, coverage="missing", answer="")],
@@ -45,6 +48,7 @@ def test_prompt_contains_each_sub_question_with_evidence():
 
 
 def test_prompt_reports_failed_sub_question_state():
+    """作答失败的子问题在提示词里标注「作答失败（原因）」，而不是伪装成证据缺失。"""
     prompt = orchestrator.build_synthesis_prompt(
         "问题", [_result(1, error="上游失败", answer="")]
     )
@@ -52,6 +56,7 @@ def test_prompt_reports_failed_sub_question_state():
 
 
 def test_unresolved_sub_questions_lists_partial_missing_and_failed():
+    """未解决集合 = coverage 非 sufficient 或发生错误的子问题（驱动第二轮补查）。"""
     results = [
         _result(1),
         _result(2, coverage="partial"),
@@ -62,9 +67,11 @@ def test_unresolved_sub_questions_lists_partial_missing_and_failed():
 
 
 def test_synthesize_uses_llm_and_returns_text(monkeypatch):
+    """非流式合成直接返回模型文本，且提示词里带上了依据原文。"""
     captured = {}
 
     def fake_invoke(prompt, **kwargs):
+        """记录提示词并返回固定答案。"""
         captured["prompt"] = prompt
         return "最终回答"
 
@@ -76,6 +83,7 @@ def test_synthesize_uses_llm_and_returns_text(monkeypatch):
 
 
 def test_order_result_is_rendered_as_evidence():
+    """订单子问题的聚合结果以「订单数量 = N」形式进入依据区，而不是被当作空证据。"""
     item = _result(1)
     item["source"] = "order"
     item["order"] = {

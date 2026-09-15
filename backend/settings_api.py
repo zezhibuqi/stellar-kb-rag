@@ -11,6 +11,7 @@ settings_bp = Blueprint("settings", __name__, url_prefix="/api/settings")
 
 
 def _settings_payload() -> dict:
+    """模型设置的统一响应体：当前模型 + 默认模型 + 全部提供方（不含密钥值）。"""
     active = llm.get_active_provider()
     return {
         "active": active.id,
@@ -47,6 +48,7 @@ def _require_valid_provider(provider_id: str):
 @require_auth
 @require_admin
 def get_model_settings():
+    """查看模型提供方与当前模型（仅 admin）。"""
     return jsonify(_settings_payload())
 
 
@@ -54,6 +56,7 @@ def get_model_settings():
 @require_auth
 @require_admin
 def switch_model():
+    """切换当前模型：校验提供方存在且密钥已配置后写 app_settings，立即对后续请求生效。"""
     data = request.get_json(silent=True) or {}
     provider_id = (data.get("provider_id") or "").strip()
     error = _require_valid_provider(provider_id)
@@ -67,6 +70,7 @@ def switch_model():
 @require_auth
 @require_admin
 def test_model():
+    """连通性测试：发一次最小真实调用；失败原因原样透出，便于管理员排错。"""
     data = request.get_json(silent=True) or {}
     provider_id = (data.get("provider_id") or "").strip()
     error = _require_valid_provider(provider_id)

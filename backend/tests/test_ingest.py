@@ -14,27 +14,34 @@ from models import get_document
 
 
 def _fake_vector(length: int = 1024) -> list[float]:
+    """构造定长假向量（维度与 bge-m3 一致，避免测试真的调用 Embedding API）。"""
     return [0.1] * length
 
 
 class _FakeResponse:
+    """requests.Response 的最小替身：只需要 status_code、json()、text 三个属性。"""
+
     def __init__(self, status_code: int, data: dict):
+        """按入参构造假响应。"""
         self.status_code = status_code
         self._json = data
         self.text = str(data)
 
     def json(self):
+        """返回预置响应体。"""
         return self._json
 
 
 @pytest.fixture()
 def client():
+    """独立的 Flask 测试客户端。"""
     app = create_app()
     app.config["TESTING"] = True
     return app.test_client()
 
 
 def _admin_headers(client) -> dict:
+    """以 admin 身份登录后的认证头。"""
     login = client.post(
         "/api/auth/login", json={"username": "admin", "password": "123456"}
     ).get_json()
@@ -44,6 +51,7 @@ def _admin_headers(client) -> dict:
 def _upload(
     client, headers: dict, content: str, filename: str = "sample.md", domain: str = "finance"
 ):
+    """上传一段 Markdown 并返回原始响应。"""
     return client.post(
         "/api/upload",
         headers=headers,
@@ -56,6 +64,7 @@ def _upload(
 
 
 def _poll(client, headers: dict, doc_id: int, timeout: float = 20.0):
+    """轮询灌库终态，同时记录状态序列供断言中间态。"""
     deadline = time.monotonic() + timeout
     statuses = []
     while time.monotonic() < deadline:
@@ -68,9 +77,11 @@ def _poll(client, headers: dict, doc_id: int, timeout: float = 20.0):
 
 
 def test_embed_texts_batch_and_truncate(monkeypatch):
+    """批量向量化：按 BATCH_SIZE 分批、超长文本截断到上限、返回顺序与入参一致。"""
     calls = []
 
     def fake_post(url, json=None, headers=None, timeout=None):
+        """假 Embedding 接口：记录请求体并按 index 返回向量。"""
         calls.append(json)
         texts = json["input"]
         return _FakeResponse(
@@ -93,9 +104,11 @@ def test_embed_texts_batch_and_truncate(monkeypatch):
 
 
 def test_embed_texts_retries_then_succeeds(monkeypatch):
+    """前两次网络异常后第三次成功：验证重试次数与最终返回。"""
     attempts = {"n": 0}
 
     def flaky_post(*args, **kwargs):
+        """前两次抛 ConnectionError，之后返回正常结果。"""
         attempts["n"] += 1
         if attempts["n"] < 3:
             raise requests.ConnectionError("网络抖动")
@@ -108,7 +121,9 @@ def test_embed_texts_retries_then_succeeds(monkeypatch):
 
 
 def test_embed_texts_fails_after_retries(monkeypatch):
+    """持续失败时抛 RuntimeError（不静默返回空向量），保证灌库任务会置 failed。"""
     def always_fail(*args, **kwargs):
+        """始终抛连接异常。"""
         raise requests.ConnectionError("服务不可用")
 
     monkeypatch.setattr(requests, "post", always_fail)
@@ -118,12 +133,14 @@ def test_embed_texts_fails_after_retries(monkeypatch):
 
 
 def test_embed_texts_requires_api_key(monkeypatch):
+    """未配置密钥时在发请求前就报错（错误信息点名缺失的变量）。"""
     monkeypatch.setattr(Config, "SILICONFLOW_API_KEY", "")
     with pytest.raises(RuntimeError, match="SILICONFLOW_API_KEY"):
         embeddings.embed_texts(["hello"])
 
 
 def test_chroma_upsert_count_delete_and_persistence(monkeypatch):
+    """Chroma 写入/计数/删除与持久化：reset 后重读仍在，删除后归零。"""
     monkeypatch.setattr(
         embeddings,
         "embed_texts",
@@ -147,6 +164,7 @@ def test_chroma_upsert_count_delete_and_persistence(monkeypatch):
 
 
 def test_upload_pipeline_ingests_to_chroma(monkeypatch, client):
+    """完整灌库链路：切块 → 向量 → metadata（含证据单元行区间与表格前缀）。"""
     monkeypatch.setattr(
         embeddings,
         "embed_texts",
@@ -189,6 +207,7 @@ def test_upload_pipeline_ingests_to_chroma(monkeypatch, client):
 
 
 def test_delete_document_clears_vectors(monkeypatch, client):
+    """删除文档时同步清空向量；随后状态查询返回 404。"""
     monkeypatch.setattr(
         embeddings,
         "embed_texts",
@@ -207,7 +226,9 @@ def test_delete_document_clears_vectors(monkeypatch, client):
 
 
 def test_embedding_failure_marks_document_failed(monkeypatch, client):
+    """Embedding 失败 → 文档置 failed，错误信息透传到状态接口。"""
     def broken_embed(texts):
+        """替身：直接抛错模拟密钥无效。"""
         raise RuntimeError("SiliconFlow API Key 无效")
 
     monkeypatch.setattr(embeddings, "embed_texts", broken_embed)

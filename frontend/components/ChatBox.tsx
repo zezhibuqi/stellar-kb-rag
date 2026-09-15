@@ -1,5 +1,14 @@
 "use client";
 
+/**
+ * 问答区核心组件：会话切换 + 提问 + SSE 流式渲染 + 来源展示 + 增强模式过程展示。
+ *
+ * 关键约定：
+ * - 助手消息在服务端流开始时就已落库（status=streaming），前端通过首个 SSE 事件拿到
+ *   message_id 并不直接使用，仅用于对齐；真正的状态机在服务端，前端只负责渲染与中断；
+ * - 上下文由服务端按会话截取，前端不发送历史消息；
+ * - 增强模式只能在当前模型具备 agent_capable 时选择，是否可用以服务端 400 为准绳。
+ */
 import { MenuOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import {
   Button,
@@ -32,17 +41,28 @@ import {
 const STICK_THRESHOLD = 120; // 距底小于该像素值时视为「贴底」，流式输出自动跟随
 
 interface ChatItem {
+  /** 展示用的消息（用户消息或助手回答）；助手项会随时间被增量刷新。 */
   role: "user" | "assistant";
   content: string;
+  /** 引用来源（收到 done 事件后写入）。 */
   sources?: ChatSource[];
+  /** 该条消息使用的模式（standard / enhanced），回放时来自消息记录。 */
   mode?: string;
+  /** 增强模式：规划阶段标记（显示「正在分析问题…」）。 */
   planning?: boolean;
+  /** 增强模式：子问题与覆盖状态（流式期间逐条填充，回放时从 trace 还原）。 */
   subProcess?: SubProcess[];
 }
 
+/** localStorage 键：记住用户上次选择的模式（standard / enhanced）。 */
 const MODE_KEY = "kb-chat-mode";
 
-/** 回放时从消息的 trace 还原分析过程 */
+/**
+ * 回放时从消息的 trace 还原分析过程。
+ *
+ * 只取用户可见字段（子问题文本、子答案、覆盖状态、错误），trace 里的检索归因等
+ * 明细属于调试信息，不在界面上展示。
+ */
 function traceProcess(item: StoredMessage): SubProcess[] {
   const trace = item.trace as
     | { sub_questions?: Array<Record<string, unknown>> }
@@ -57,7 +77,12 @@ function traceProcess(item: StoredMessage): SubProcess[] {
   }));
 }
 
-/** 回放历史消息时把非正常结束的状态显式标出来 */
+/**
+ * 回放历史消息时把非正常结束的状态显式标出来。
+ *
+ * 中断/失败/未完成的消息在数据库里保留的是「已产出的部分内容」，回放时补一行后缀，
+ * 避免用户把半截回答误读成完整答案。
+ */
 function replayContent(item: StoredMessage): string {
   if (item.role !== "assistant") return item.content;
   const suffix =
@@ -72,6 +97,11 @@ function replayContent(item: StoredMessage): string {
   return item.content ? `${item.content}\n\n${suffix}` : suffix;
 }
 
+/**
+ * 问答区组件：自持会话选择、消息列表、输入态与模式选择。
+ *
+ * 组件内不做权限判断（除模式可用性提示外），越权与模式校验一律由服务端返回的错误码决定。
+ */
 export default function ChatBox() {
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -171,6 +201,7 @@ export default function ChatBox() {
   };
 
   const send = async () => {
+    // 乐观插入：先把用户消息与一条空的助手消息放进列表，后续 token 增量填充最后一条
     const question = input.trim();
     if (!question || loading || conversationId === null) return;
 
@@ -195,6 +226,7 @@ export default function ChatBox() {
       });
 
     const finishWith = (text: string) => {
+      // 中断/失败时把已产出的内容保留下来，并在末尾补一句状态说明
       answer = answer ? `${answer}\n\n（${text}）` : text;
       updateLast((item) => ({ ...item, content: answer }));
     };
@@ -215,6 +247,8 @@ export default function ChatBox() {
             message.error(text);
           },
           onStage: (event) => {
+            // 增强模式的过程事件 → 分析过程容器：planning 占位、planned 建列表、
+            // sub_answer 逐条填充（follow_up=true 的是第二轮补充检索）、synthesizing 收尾
             const stage = String(event.stage);
             if (stage === "planning") {
               updateLast((item) => ({ ...item, planning: true }));
