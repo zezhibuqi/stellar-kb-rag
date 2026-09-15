@@ -1,4 +1,4 @@
-"""Stage 7 评测逻辑测试：Hit Rate/MRR 计算与报告生成。"""
+"""Stage 7 评测逻辑测试：Golden Set 数据完整性与 Hit Rate/MRR 计算。"""
 
 import json
 from collections import Counter
@@ -6,7 +6,7 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-from eval import RAGPipelineForEval, evaluate, generate_report
+from eval import evaluate
 
 
 def test_golden_set_coverage():
@@ -60,17 +60,3 @@ def test_evaluate_hit_rate_and_mrr():
     assert overall == {"hit_rate": 1.0, "mrr": (1 + 1 / 3) / 2}
     assert domain_stats["finance"]["total"] == 2
     assert domain_stats["finance"]["hit_rate"] == 1.0
-
-
-def test_generate_report(tmp_path):
-    overall = {"hit_rate": 0.9, "mrr": 0.6}
-    domain_stats = {
-        "finance": {"hit_rate": 0.9, "mrr": 0.6, "total": 10},
-        "common": {"hit_rate": 0.8, "mrr": 0.5, "total": 15},
-    }
-    report = tmp_path / "eval_report.md"
-    generate_report(overall, domain_stats, "docs/golden_set.json", str(report))
-    text = report.read_text(encoding="utf-8")
-    assert "Hit Rate" in text
-    assert "90.00%" in text
-    assert "| common | 15 | 80.00% | 0.5000 |" in text

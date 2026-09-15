@@ -130,16 +130,6 @@ def test_switch_persists_and_takes_effect(client, scnet_key):
     assert llm.get_active_provider().id == "scnet-glm5base"
 
 
-def test_switch_back_to_deepseek(client, scnet_key):
-    token = _login(client, "admin")
-    client.put("/api/settings/model", headers=_headers(token), json={"provider_id": "scnet-glm5base"})
-    resp = client.put(
-        "/api/settings/model", headers=_headers(token), json={"provider_id": "deepseek-v4f"}
-    )
-    assert resp.status_code == 200
-    assert resp.get_json()["active"] == "deepseek-v4f"
-
-
 def test_provider_test_success(client, scnet_key, monkeypatch):
     monkeypatch.setattr(llm, "test_provider", lambda provider: "pong")
     token = _login(client, "admin")

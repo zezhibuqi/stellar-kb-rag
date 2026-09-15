@@ -1,5 +1,6 @@
 """测试级配置：使用临时数据库与 Chroma 目录，并在每个用例前重建。"""
 
+import functools
 import os
 import sys
 import tempfile
@@ -7,6 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from werkzeug.security import generate_password_hash as _werkzeug_generate_password_hash
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
@@ -18,8 +20,17 @@ os.environ["CHROMA_PERSIST_DIR"] = os.path.join(_TEST_DIR, "chroma_placeholder")
 
 import chroma_store  # noqa: E402
 from config import Config  # noqa: E402
+import models  # noqa: E402
 from models import close_connection, init_db  # noqa: E402
 from tasks import wait_idle  # noqa: E402
+
+# 测试提速：种子账号默认用 werkzeug 的 scrypt（单次约 0.3s，5 个账号约 1.5s），
+# 而每个用例都要重建数据库——实测它占整套测试约 80% 的时间（init_db 首次 1.69s，
+# 对已有库重复调用仅 0.003s）。哈希串自带算法标识，check_password_hash 仍能正常
+# 校验登录/改密流程，因此测试期改用轻量 pbkdf2；生产代码不受影响、不做此替换。
+models.generate_password_hash = functools.partial(
+    _werkzeug_generate_password_hash, method="pbkdf2:sha256:600"
+)
 
 
 @pytest.fixture(autouse=True)

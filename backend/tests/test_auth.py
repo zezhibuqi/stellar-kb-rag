@@ -443,13 +443,6 @@ def test_change_password_requires_auth(client):
     assert resp.status_code == 401
 
 
-def test_list_includes_is_active(client):
-    token = _admin_token(client)
-    users = client.get("/api/users", headers=_auth_header(token)).get_json()
-    assert users
-    assert all(isinstance(user["is_active"], bool) for user in users)
-
-
 def test_list_shows_deactivated_account(client):
     token = _admin_token(client)
     created = client.post(

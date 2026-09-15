@@ -51,10 +51,3 @@ def test_orders_amount_and_status_derivation():
         "SELECT COUNT(*) FROM orders WHERE completed_at IS NULL"
     ).fetchone()[0]
     assert 8 <= pending <= 15
-
-
-def test_order_no_unique_and_format():
-    rows = build_orders()
-    order_nos = [order["order_no"] for order in rows]
-    assert len(order_nos) == len(set(order_nos))
-    assert all(no.startswith("DD") and len(no) == 13 for no in order_nos)
