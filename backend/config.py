@@ -38,13 +38,11 @@ class Config:
     SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    SCNET_API_KEY = os.getenv("SCNET_API_KEY", "")
-    SCNET_BASE_URL = os.getenv("SCNET_BASE_URL", "https://api.scnet.cn/api/llm/v1")
     XIAOMI_API_KEY = os.getenv("XIAOMI_API_KEY", "")
     XIAOMI_BASE_URL = os.getenv("XIAOMI_BASE_URL", "https://api.xiaomimimo.com/v1")
 
     # 当前模型的默认值（管理员可在界面切换，DB 设置优先）
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek-v4f")
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek-flash")
 
     # ── 新增 LLM 提供方示例：与此配套还需在 llm.py 的 _build_providers()
     #    注册 ModelProvider（模型标识直接写在注册表），并在 .env 填写密钥

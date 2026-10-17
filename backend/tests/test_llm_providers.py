@@ -10,21 +10,47 @@ from models import get_setting, set_setting
 
 
 @pytest.fixture()
-def scnet_key(monkeypatch):
-    """临时为 scnet 提供方配置密钥，用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet-glm5base"].api_key
-    llm.PROVIDERS["scnet-glm5base"].api_key = "sk-test-scnet"
+def xiaomi_key():
+    """临时为小米 flash 提供方配置密钥，用例结束后恢复。"""
+    provider = llm.PROVIDERS["xiaomi-mimov2.6-flash"]
+    original = provider.api_key
+    provider.api_key = "sk-test-xiaomi"
     yield
-    llm.PROVIDERS["scnet-glm5base"].api_key = original
+    provider.api_key = original
 
 
 @pytest.fixture()
-def no_scnet_key():
-    """临时清除 scnet 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet-glm5base"].api_key
-    llm.PROVIDERS["scnet-glm5base"].api_key = ""
+def no_xiaomi_key():
+    """临时清除小米 flash 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
+    provider = llm.PROVIDERS["xiaomi-mimov2.6-flash"]
+    original = provider.api_key
+    provider.api_key = ""
     yield
-    llm.PROVIDERS["scnet-glm5base"].api_key = original
+    provider.api_key = original
+
+
+@pytest.fixture()
+def thinking_provider():
+    """向注册表注入一个「非默认能力」提供方，覆盖 capability 分支。
+
+    scnet 下线后，注册表里已没有关闭 response_format / stream_usage 的真实端点；
+    用注入的替身保住这些分支的测试覆盖，且不依赖任何外部平台。
+    """
+    provider = llm.ModelProvider(
+        id="test-thinking",
+        name="Test-Thinking",
+        platform="测试",
+        base_url="https://example.invalid/v1",
+        model="test-thinking",
+        api_key="sk-test-thinking",
+        router_max_tokens=2000,
+        supports_response_format=False,
+        supports_stream_usage=False,
+    )
+    llm.PROVIDERS[provider.id] = provider
+    yield provider
+    llm.PROVIDERS.pop(provider.id, None)
+    llm._clients.pop(provider.id, None)
 
 
 def _fake_client(calls: list, stream: bool = False, reply: str = "ok"):
@@ -52,72 +78,73 @@ def _fake_client(calls: list, stream: bool = False, reply: str = "ok"):
 
 
 def test_registry_contains_preset_providers():
-    """注册表内置 5 个提供方，id 与模型/地址与预期一致（新增模型时这里也要改）。"""
+    """注册表内置 4 个提供方；scnet 已按 ADR 0011 下线，小米为 v2.6 两条。"""
     providers = {p.id: p for p in llm.list_providers()}
     assert set(providers) == {
-        "deepseek-v4f",
-        "scnet-glm5base",
+        "deepseek-flash",
         "siliconflow-dsv4f",
-        "xiaomi-mimov2.5",
-        "xiaomi-mimov2.5pro",
+        "xiaomi-mimov2.6-flash",
+        "xiaomi-mimov2.6-pro",
     }
-    assert providers["deepseek-v4f"].model == "deepseek-v4-flash"
-    assert providers["deepseek-v4f"].base_url == Config.DEEPSEEK_BASE_URL
-    assert providers["scnet-glm5base"].model == "GLM-5-Base"
-    assert providers["scnet-glm5base"].base_url == "https://api.scnet.cn/api/llm/v1"
+    assert "scnet-glm5base" not in providers
+    assert providers["deepseek-flash"].model == "deepseek-flash"
+    assert providers["deepseek-flash"].base_url == Config.DEEPSEEK_BASE_URL
+    assert providers["xiaomi-mimov2.6-flash"].model == "mimo-v2.6-flash"
+    assert providers["xiaomi-mimov2.6-pro"].model == "mimo-v2.6-pro"
+    assert providers["xiaomi-mimov2.6-flash"].agent_capable is False
 
 
 def test_active_provider_defaults_to_env(monkeypatch):
     """DB 无设置时，当前模型取 .env 的 LLM_PROVIDER。"""
-    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-v4f")
-    assert llm.get_active_provider().id == "deepseek-v4f"
+    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-flash")
+    assert llm.get_active_provider().id == "deepseek-flash"
 
 
 
-def test_active_provider_follows_db_setting(scnet_key):
+def test_active_provider_follows_db_setting(xiaomi_key):
     """DB 有设置时以 DB 为准（管理员界面切换后重启仍然生效）。"""
     assert get_setting(llm.SETTING_KEY) is None
-    set_setting(llm.SETTING_KEY, "scnet-glm5base")
-    assert llm.get_active_provider().id == "scnet-glm5base"
+    set_setting(llm.SETTING_KEY, "xiaomi-mimov2.6-flash")
+    assert llm.get_active_provider().id == "xiaomi-mimov2.6-flash"
 
 
 def test_active_provider_falls_back_on_invalid_setting(monkeypatch):
     """DB 里的提供方被移除（失效 id）时自动回退默认提供方，不抛异常。"""
-    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-v4f")
+    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-flash")
     set_setting(llm.SETTING_KEY, "not-a-provider")
-    assert llm.get_active_provider().id == "deepseek-v4f"
+    assert llm.get_active_provider().id == "deepseek-flash"
 
 
-def test_get_client_rejects_missing_key(no_scnet_key):
+def test_get_client_rejects_missing_key(no_xiaomi_key):
     """密钥未配置的提供方取客户端即报错，避免发出必然失败的请求。"""
-    set_setting(llm.SETTING_KEY, "scnet-glm5base")
+    set_setting(llm.SETTING_KEY, "xiaomi-mimov2.6-flash")
     with pytest.raises(RuntimeError, match="API Key 未配置"):
         llm.get_client()
 
 
-def test_invoke_uses_active_provider_model(monkeypatch, scnet_key):
+def test_invoke_uses_active_provider_model(monkeypatch, xiaomi_key):
     """invoke 用当前模型发请求；切换后下一次调用即换模型（无需重启）。"""
     calls: list = []
     monkeypatch.setattr(llm, "get_client", lambda provider=None: _fake_client(calls))
-    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-v4f")
+    monkeypatch.setattr(Config, "LLM_PROVIDER", "deepseek-flash")
     assert llm.invoke("hi") == "ok"
-    assert calls[0]["model"] == "deepseek-v4-flash"
+    assert calls[0]["model"] == "deepseek-flash"
 
-    set_setting(llm.SETTING_KEY, "scnet-glm5base")
+    set_setting(llm.SETTING_KEY, "xiaomi-mimov2.6-flash")
     assert llm.invoke("hi") == "ok"
-    assert calls[1]["model"] == "GLM-5-Base"
+    assert calls[1]["model"] == "mimo-v2.6-flash"
 
 
-def test_invoke_json_uses_active_provider_model(monkeypatch, scnet_key):
-    """JSON 调用同样跟随当前模型，且 scnet 走「跳过 response_format + 加大预算」分支。"""
+def test_invoke_json_uses_active_provider_model(monkeypatch, thinking_provider):
+    """JSON 调用跟随当前模型；关闭 response_format 的端点走「跳过 + 加大预算」分支。"""
     calls: list = []
     fake = _fake_client(calls, reply='{"intent": "knowledge"}')
     monkeypatch.setattr(llm, "get_client", lambda provider=None: fake)
-    set_setting(llm.SETTING_KEY, "scnet-glm5base")
+    set_setting(llm.SETTING_KEY, thinking_provider.id)
     result = llm.invoke_json('输出 {"intent": "knowledge"}')
     assert result == {"intent": "knowledge"}
-    assert calls[0]["model"] == "GLM-5-Base"
-    # scnet（GLM-5-Base）不支持 response_format，应跳过且加大路由 token 预算
+    assert calls[0]["model"] == "test-thinking"
+    # 该端点不支持 response_format，应跳过且加大路由 token 预算
     assert "response_format" not in calls[0]
     assert calls[0]["max_tokens"] == 2000
 
@@ -163,14 +190,14 @@ def test_stream_truncated_without_content_raises(monkeypatch):
         list(llm.stream("hi"))
 
 
-def test_stream_uses_active_provider_model(monkeypatch, scnet_key):
+def test_stream_uses_active_provider_model(monkeypatch, xiaomi_key):
     """流式调用走当前模型，并且请求里 stream=True。"""
     calls: list = []
     monkeypatch.setattr(llm, "get_client", lambda provider=None: _fake_client(calls, stream=True))
-    set_setting(llm.SETTING_KEY, "scnet-glm5base")
+    set_setting(llm.SETTING_KEY, "xiaomi-mimov2.6-flash")
     tokens = list(llm.stream("hi"))
     assert tokens == ["token"]
-    assert calls[0]["model"] == "GLM-5-Base"
+    assert calls[0]["model"] == "mimo-v2.6-flash"
     assert calls[0]["stream"] is True
 
 
@@ -266,7 +293,30 @@ def test_stream_retries_without_stream_options_when_unsupported(monkeypatch):
     assert sink == {}
 
 
-def test_scnet_disables_stream_usage(scnet_key):
-    """GLM-5-Base 端点已知不兼容项多，流式用量显式关闭而不是试错。"""
-    assert llm.PROVIDERS["scnet-glm5base"].supports_stream_usage is False
-    assert llm.PROVIDERS["deepseek-v4f"].supports_stream_usage is True
+def test_injected_provider_disables_stream_usage(monkeypatch, thinking_provider):
+    """非默认能力标志必须被调用层尊重：关闭用量时不带 stream_options。"""
+    calls: list = []
+    monkeypatch.setattr(
+        llm, "get_client", lambda provider=None: _fake_client(calls, stream=True)
+    )
+    set_setting(llm.SETTING_KEY, thinking_provider.id)
+    sink: dict = {}
+    assert list(llm.stream("hi", usage=sink)) == ["token"]
+    assert "stream_options" not in calls[0]
+    assert sink == {}
+
+
+def test_health_reports_stored_and_active_provider():
+    """健康检查同时暴露 DB 存储值与实际生效模型；失效 id 时 fallback=True。"""
+    from app import create_app
+
+    client = create_app().test_client()
+    set_setting(llm.SETTING_KEY, "not-a-provider")
+    data = client.get("/api/health").get_json()["llm_provider"]
+    assert data["stored"] == "not-a-provider"
+    assert data["active"] == llm.DEFAULT_PROVIDER_ID
+    assert data["fallback"] is True
+
+    set_setting(llm.SETTING_KEY, llm.DEFAULT_PROVIDER_ID)
+    data = client.get("/api/health").get_json()["llm_provider"]
+    assert data["fallback"] is False

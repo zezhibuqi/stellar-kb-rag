@@ -18,7 +18,7 @@
 - **会话与消息**：每用户最多保留 5 个会话，上下文由服务端统一截取最近 10 轮；消息带模式与状态（`streaming` / `completed` / `failed` / `aborted`），可回放分析与来源
 - **结构化表格处理**：Markdown 表格完整保留，避免切片破坏语义
 - **智能问答生成**：基于 LLM 生成回答，支持流式（SSE）输出；生成失败显式提示而非静默断流
-- **管理员可切换模型**：预设提供方注册表（OpenAI 兼容协议，内置 DeepSeek、硅基流动、超算互联网、小米平台的 5 个模型），界面切换当前模型并即时生效，支持连通性测试；思考型模型的推理预算与 `response_format` 兼容性在注册表中按提供方声明
+- **管理员可切换模型**：预设提供方注册表（OpenAI 兼容协议，内置 DeepSeek 官方、硅基流动、小米平台的 4 个模型），界面切换当前模型并即时生效，支持连通性测试；思考型模型的推理预算与 `response_format` 兼容性在注册表中按提供方声明
 - **异步文档入库**：Web 端上传后后台处理，避免超时；支持状态轮询
 - **离线灌库脚本**：批量处理 Markdown 文件，便于初始化数据
 - **管理员面板**：文档上传/删除/列表，用户创建/角色管理/停用启用/永久删除/重置密码
@@ -41,7 +41,7 @@
 |           | 结构化数据     | SQLite（WAL 模式 + 每线程独立连接）                                               |
 | **AI 模型** | Embedding | `BAAI/bge-m3`（SiliconFlow API，1024 维）                                  |
 |           | Reranker  | `BAAI/bge-reranker-v2-m3`（自定义封装）                                       |
-|           | LLM       | OpenAI 兼容接口，内置 5 个模型：DeepSeek-V4-Flash-0731（DeepSeek）、GLM-5-Base（超算互联网 scnet）、DeepSeek-V4-Flash-0731（硅基流动）、MIMO-V2.5 / MIMO-V2.5-Pro（小米）；管理员界面切换，流式支持，新增 OpenAI 兼容模型只需在注册表登记 |
+|           | LLM       | OpenAI 兼容接口，内置 4 个模型：DeepSeek-Flash（DeepSeek 官方）、DeepSeek-V4-Flash-0731（硅基流动）、MIMO-V2.6-Flash / MIMO-V2.6-Pro（小米）；管理员界面切换，流式支持，新增 OpenAI 兼容模型只需在注册表登记 |
 
 ---
 
@@ -134,10 +134,9 @@ Copy-Item .env.example .env   # Windows
 
 - `SILICONFLOW_API_KEY`：硅基流动 API 密钥
 - `DEEPSEEK_API_KEY`：DeepSeek API 密钥
-- `SCNET_API_KEY`：超算互联网（scnet）API 密钥（使用 GLM-5-Base 时必填；不填则该模型在界面中不可切换）
-- `XIAOMI_API_KEY`：小米 API 密钥（使用 MIMO-V2.5 / MIMO-V2.5-Pro 时必填；不填则该模型在界面中不可切换）
+- `XIAOMI_API_KEY`：小米 API 密钥（使用 MIMO-V2.6-Flash / MIMO-V2.6-Pro 时必填；不填则该模型在界面中不可切换）
 - `JWT_SECRET_KEY`：随机字符串（≥32 字符）
-- `LLM_PROVIDER`：当前模型的默认 id（须为注册表中已存在的 id，如 `deepseek-v4f`、`scnet-glm5base`），管理员界面切换后以 DB 设置为准
+- `LLM_PROVIDER`：当前模型的默认 id（须为注册表中已存在的 id，如 `deepseek-flash`、`xiaomi-mimov2.6-flash`），管理员界面切换后以 DB 设置为准
 
 初始化数据库并启动后端：
 
@@ -217,7 +216,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 
 ## 新增 LLM 模型提供方
 
-LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走 OpenAI 兼容接口。已内置 5 个模型：DeepSeek 的 DeepSeek-V4-Flash-0731（`deepseek-v4f`）、硅基流动的 DeepSeek-V4-Flash-0731（`siliconflow-dsv4f`）、超算互联网的 GLM-5-Base（`scnet-glm5base`）、小米的 MIMO-V2.5 / MIMO-V2.5-Pro（`xiaomi-mimov2.5`、`xiaomi-mimov2.5pro`）。任何 OpenAI 兼容协议的模型均可接入——模型设置页面与接口均从注册表动态渲染，**新增模型只需三步、无需改动前端**：
+LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走 OpenAI 兼容接口。已内置 4 个模型：DeepSeek 官方的 DeepSeek-Flash（`deepseek-flash`）、硅基流动的 DeepSeek-V4-Flash-0731（`siliconflow-dsv4f`）、小米的 MIMO-V2.6-Flash / MIMO-V2.6-Pro（`xiaomi-mimov2.6-flash`、`xiaomi-mimov2.6-pro`）。任何 OpenAI 兼容协议的模型均可接入——模型设置页面与接口均从注册表动态渲染，**新增模型只需三步、无需改动前端**：
 
 1. **注册提供方**：在 `llm.py` 的 `_build_providers()` 列表中新增一项 `ModelProvider(...)`（文件内有完整注释示例，可参考抄改）；**模型标识直接写在 `model` 字段**，同平台多模型只需 `id` 唯一、`base_url` 与密钥可复用；
 2. **添加配置项**：在 `config.py` 中为该平台的密钥与接口地址新增环境变量映射（同样有注释示例）；
@@ -225,11 +224,11 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 
 完成后 `/settings` 页面会自动出现新模型卡片，可直接测试连接与切换。
 
-**能力标志提示**（注册表字段，来自 GLM-5-Base 的实测经验）：
+**能力标志提示**（注册表字段，来自历史模型接入的实测经验）：
 
 - 普通对话模型（DeepSeek、DeepSeek-V4-Flash@SiliconFlow 等）：默认参数即可；
 - **思考型模型**（先输出 `reasoning_content` 再输出 `content`）：路由调用需预留推理预算，设 `router_max_tokens=2000`；若该端点传 `response_format=json_object` 会报错或返回乱码，设 `supports_response_format=False`。判断方法：切换后问一句订单问题，失败时看后端日志与"测试连接"结果定位。
-- **流式 token 用量**：`supports_stream_usage` 默认 `True`，增强模式的流式调用会带 `stream_options.include_usage` 以把每步 token 用量写入 trace；端点不认识该参数时注册为 `False`（如 scnet），trace 里该步用量留空，回答不受影响。
+- **流式 token 用量**：`supports_stream_usage` 默认 `True`，增强模式的流式调用会带 `stream_options.include_usage` 以把每步 token 用量写入 trace；端点不认识该参数时注册为 `False`，trace 里该步用量留空，回答不受影响。
 
 ---
 

@@ -15,21 +15,23 @@ def client():
 
 
 @pytest.fixture()
-def scnet_key():
-    """临时为 scnet 提供方配置密钥，用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet-glm5base"].api_key
-    llm.PROVIDERS["scnet-glm5base"].api_key = "sk-test-scnet"
+def xiaomi_key():
+    """临时为小米 flash 提供方配置密钥，用例结束后恢复。"""
+    provider = llm.PROVIDERS["xiaomi-mimov2.6-flash"]
+    original = provider.api_key
+    provider.api_key = "sk-test-xiaomi"
     yield
-    llm.PROVIDERS["scnet-glm5base"].api_key = original
+    provider.api_key = original
 
 
 @pytest.fixture()
-def no_scnet_key():
-    """临时清除 scnet 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
-    original = llm.PROVIDERS["scnet-glm5base"].api_key
-    llm.PROVIDERS["scnet-glm5base"].api_key = ""
+def no_xiaomi_key():
+    """临时清除小米 flash 密钥（本机 .env 可能配置了真实密钥），用例结束后恢复。"""
+    provider = llm.PROVIDERS["xiaomi-mimov2.6-flash"]
+    original = provider.api_key
+    provider.api_key = ""
     yield
-    llm.PROVIDERS["scnet-glm5base"].api_key = original
+    provider.api_key = original
 
 
 def _login(client, username: str, password: str = "123456"):
@@ -64,14 +66,13 @@ def test_get_model_settings_shape(client):
     resp = client.get("/api/settings/model", headers=_headers(token))
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["active"] == "deepseek-v4f"
-    assert data["default"] == "deepseek-v4f"
+    assert data["active"] == "deepseek-flash"
+    assert data["default"] == "deepseek-flash"
     assert {p["id"] for p in data["providers"]} == {
-        "deepseek-v4f",
-        "scnet-glm5base",
+        "deepseek-flash",
         "siliconflow-dsv4f",
-        "xiaomi-mimov2.5",
-        "xiaomi-mimov2.5pro",
+        "xiaomi-mimov2.6-flash",
+        "xiaomi-mimov2.6-pro",
     }
     for provider in data["providers"]:
         assert set(provider) == {
@@ -97,55 +98,54 @@ def test_switch_rejects_unknown_provider(client):
     assert resp.status_code == 404
 
 
-def test_switch_rejects_unconfigured_key(client, no_scnet_key):
+def test_switch_rejects_unconfigured_key(client, no_xiaomi_key):
     """密钥未配置的提供方不可切换（400），且不会写入设置。"""
     token = _login(client, "admin")
     resp = client.put(
         "/api/settings/model",
         headers=_headers(token),
-        json={"provider_id": "scnet-glm5base"},
+        json={"provider_id": "xiaomi-mimov2.6-flash"},
     )
     assert resp.status_code == 400
     assert resp.get_json()["code"] == "PROVIDER_KEY_MISSING"
     # 未写入设置
     resp = client.get("/api/settings/model", headers=_headers(token))
-    assert resp.get_json()["active"] == "deepseek-v4f"
+    assert resp.get_json()["active"] == "deepseek-flash"
 
 
-def test_switch_persists_and_takes_effect(client, scnet_key):
+def test_switch_persists_and_takes_effect(client, xiaomi_key):
     """切换成功：响应与再次查询都指向新模型，llm.get_active_provider 同步生效。"""
     token = _login(client, "admin")
     resp = client.put(
         "/api/settings/model",
         headers=_headers(token),
-        json={"provider_id": "scnet-glm5base"},
+        json={"provider_id": "xiaomi-mimov2.6-flash"},
     )
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["active"] == "scnet-glm5base"
+    assert data["active"] == "xiaomi-mimov2.6-flash"
     active_flags = {p["id"]: p["active"] for p in data["providers"]}
     assert active_flags == {
-        "deepseek-v4f": False,
-        "scnet-glm5base": True,
+        "deepseek-flash": False,
         "siliconflow-dsv4f": False,
-        "xiaomi-mimov2.5": False,
-        "xiaomi-mimov2.5pro": False,
+        "xiaomi-mimov2.6-flash": True,
+        "xiaomi-mimov2.6-pro": False,
     }
 
-    # 再次查询仍为 scnet（DB 持久化）
+    # 再次查询仍为小米 flash（DB 持久化）
     resp = client.get("/api/settings/model", headers=_headers(token))
-    assert resp.get_json()["active"] == "scnet-glm5base"
-    assert llm.get_active_provider().id == "scnet-glm5base"
+    assert resp.get_json()["active"] == "xiaomi-mimov2.6-flash"
+    assert llm.get_active_provider().id == "xiaomi-mimov2.6-flash"
 
 
-def test_provider_test_success(client, scnet_key, monkeypatch):
+def test_provider_test_success(client, xiaomi_key, monkeypatch):
     """连通性测试成功：返回 ok 与模型回显。"""
     monkeypatch.setattr(llm, "test_provider", lambda provider: "pong")
     token = _login(client, "admin")
     resp = client.post(
         "/api/settings/model/test",
         headers=_headers(token),
-        json={"provider_id": "scnet-glm5base"},
+        json={"provider_id": "xiaomi-mimov2.6-flash"},
     )
     assert resp.status_code == 200
     data = resp.get_json()
@@ -164,7 +164,7 @@ def test_provider_test_failure_returns_502(client, monkeypatch):
     resp = client.post(
         "/api/settings/model/test",
         headers=_headers(token),
-        json={"provider_id": "deepseek-v4f"},
+        json={"provider_id": "deepseek-flash"},
     )
     assert resp.status_code == 502
     assert resp.get_json()["code"] == "PROVIDER_TEST_FAILED"

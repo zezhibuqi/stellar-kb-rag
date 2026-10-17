@@ -1,5 +1,7 @@
 # 多模型对比评测报告
 
+> **历史数据说明**：本报告生成于 2026-08-26，当时的注册表包含 scnet GLM-5-Base 与 MIMO-V2.5 系列；该列表已于 2026-10-17 调整（下线 scnet、小米升级到 v2.6、DeepSeek 官方改为 `deepseek-flash`，见 ADR 0011）。报告作为历史实验结果原样保留，未重跑。
+
 - 评测日期：2026-08-26
 - 订单 Golden Set：docs/golden_orders.json（答案正确率 / 路由准确率）
 - 检索 Golden Set：docs/golden_set.json（对照组，管线不含 LLM）

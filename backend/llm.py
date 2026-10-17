@@ -1,7 +1,7 @@
 """LLM 客户端（OpenAI 兼容接口）：预设提供方注册表 + 管理员可切换的当前模型。
 
 当前模型的解析顺序：app_settings 表的 llm_provider 值 → .env 的 LLM_PROVIDER
-→ 注册表中的 deepseek-v4f 兜底。回答生成与意图路由共用同一当前模型。
+→ 注册表中的 deepseek-flash 兜底。回答生成与意图路由共用同一当前模型。
 """
 
 import json
@@ -26,10 +26,10 @@ class ModelProvider:
     base_url: str
     model: str
     api_key: str
-    # 思考型模型（如 GLM-5-Base）先输出 reasoning_content 再输出 content：
-    # JSON 路由需要预留推理 token 预算
+    # 思考型模型先输出 reasoning_content 再输出 content：JSON 路由需要预留推理
+    # token 预算（实测 300 会被推理耗尽而返回空内容）
     router_max_tokens: int = 300
-    # scnet GLM-5-Base 上 response_format=json_object 会返回乱序文本（finish=abort），
+    # 个别端点不支持 response_format=json_object（会报错或返回乱序文本），
     # 不支持的能力需在注册表中显式关闭
     supports_response_format: bool = True
     # 流式调用是否接受 stream_options.include_usage（trace 里 token 用量的来源）；
@@ -54,24 +54,13 @@ def _build_providers() -> dict[str, ModelProvider]:
     """
     providers = [
         ModelProvider(
-            id="deepseek-v4f",
-            name="DeepSeek-V4-Flash-0731",
+            id="deepseek-flash",
+            name="DeepSeek-Flash",
             platform="DeepSeek 开放平台",
             base_url=Config.DEEPSEEK_BASE_URL,
-            model="deepseek-v4-flash",
+            model="deepseek-flash",
             api_key=Config.DEEPSEEK_API_KEY,
             agent_capable=True,
-        ),
-        ModelProvider(
-            id="scnet-glm5base",
-            name="GLM-5-Base",
-            platform="国家超算互联网（scnet）",
-            base_url=Config.SCNET_BASE_URL,
-            model="GLM-5-Base",
-            api_key=Config.SCNET_API_KEY,
-            router_max_tokens=2000,
-            supports_response_format=False,
-            supports_stream_usage=False,
         ),
         ModelProvider(
             id="siliconflow-dsv4f",
@@ -83,20 +72,20 @@ def _build_providers() -> dict[str, ModelProvider]:
             agent_capable=True,
         ),
         ModelProvider(
-            id="xiaomi-mimov2.5",
-            name="MIMO-V2.5",
+            id="xiaomi-mimov2.6-flash",
+            name="MIMO-V2.6-Flash",
             platform="小米",
             base_url=Config.XIAOMI_BASE_URL,
-            model="mimo-v2.5",
+            model="mimo-v2.6-flash",
             api_key=Config.XIAOMI_API_KEY,
             router_max_tokens=2000,
         ),
         ModelProvider(
-            id="xiaomi-mimov2.5pro",
-            name="MIMO-V2.5-Pro",
+            id="xiaomi-mimov2.6-pro",
+            name="MIMO-V2.6-Pro",
             platform="小米",
             base_url=Config.XIAOMI_BASE_URL,
-            model="mimo-v2.5-pro",
+            model="mimo-v2.6-pro",
             api_key=Config.XIAOMI_API_KEY,
             router_max_tokens=2000,
         ),
@@ -114,7 +103,7 @@ def _build_providers() -> dict[str, ModelProvider]:
         #     model="deepseek-ai/DeepSeek-V4-Flash",     # 平台的模型标识
         #     api_key=Config.SILICONFLOW_LLM_KEY,
         #     # 能力标志（普通对话模型用默认值即可）：
-        #     # 思考型模型（先输出 reasoning_content 再输出 content，如 GLM-5-Base）
+        #     # 思考型模型（先输出 reasoning_content 再输出 content）
         #     # 需预留路由推理预算：router_max_tokens=2000；
         #     # 传 response_format=json_object 会报错/乱码的端点：supports_response_format=False
         #     # router_max_tokens=2000,
@@ -126,7 +115,7 @@ def _build_providers() -> dict[str, ModelProvider]:
 
 PROVIDERS = _build_providers()
 DEFAULT_PROVIDER_ID = (
-    Config.LLM_PROVIDER if Config.LLM_PROVIDER in PROVIDERS else "deepseek-v4f"
+    Config.LLM_PROVIDER if Config.LLM_PROVIDER in PROVIDERS else "deepseek-flash"
 )
 
 _clients: dict[str, OpenAI] = {}
@@ -146,6 +135,11 @@ def get_active_provider() -> ModelProvider:
     """解析当前模型；DB 值缺失或已失效时回退默认提供方。"""
     stored = get_setting(SETTING_KEY) or ""
     return PROVIDERS.get(stored) or PROVIDERS[DEFAULT_PROVIDER_ID]
+
+
+def get_stored_provider_id() -> str | None:
+    """DB 里保存的当前模型 id（可能已失效）；供健康检查对比实际生效模型。"""
+    return get_setting(SETTING_KEY)
 
 
 def get_client(provider: ModelProvider | None = None) -> OpenAI:

@@ -42,9 +42,14 @@ def check_components() -> dict:
     }
     try:
         active = llm.get_active_provider()
+        stored = llm.get_stored_provider_id()
         components["llm_provider"] = {
-            "id": active.id,
+            # stored 是 DB 里的原值（可能已失效），active 是实际生效的提供方；
+            # fallback=True 说明数据库设置指向了已下线的提供方，已回退到默认模型
+            "stored": stored,
+            "active": active.id,
             "model": active.model,
+            "fallback": bool(stored) and stored != active.id,
             "status": "configured" if active.configured else "missing",
         }
     except Exception as exc:  # noqa: BLE001

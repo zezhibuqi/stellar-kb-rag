@@ -65,7 +65,7 @@ _Avoid_：意图识别、路由分类
 _Avoid_：数据库问答、NL2SQL
 
 **模型提供方（model provider）**：
-预先注册的可切换 LLM 服务选项之一（如 DeepSeek、超算互联网 GLM-5-Base），由服务地址、模型标识与密钥构成；仅管理员可切换，Embedding 与 Reranker 不在其列。
+预先注册的可切换 LLM 服务选项之一（如 DeepSeek 官方、硅基流动、小米），由服务地址、模型标识与密钥构成；仅管理员可切换，Embedding 与 Reranker 不在其列。
 _Avoid_：基座模型、大模型选项
 
 **当前模型（active model）**：
