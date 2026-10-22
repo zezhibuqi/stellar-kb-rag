@@ -83,7 +83,7 @@ stellar-kb-rag/
 │   ├── demo_retrieve.py    # 离线检索演示脚本（权限过滤 + 重排）
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（233 个用例）
+│   └── tests/              # 自动化测试（244 个用例）
 ├── frontend/
 │   ├── app/                # login / chat / knowledge / users / viewer / orders / settings 页面
 │   ├── components/         # LayoutWrapper / ChatBox / ConversationList / AnalysisPanel / SourceCard / ThemeProvider
@@ -236,7 +236,7 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（233 个用例）
+# 单元/接口/评测逻辑测试（244 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）

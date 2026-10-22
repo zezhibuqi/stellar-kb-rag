@@ -6,6 +6,7 @@ from flask import Blueprint, g, jsonify, request
 
 import tasks
 from auth import require_admin, require_auth
+from config import Config
 from errors import api_error
 from models import (
     create_document,
@@ -70,10 +71,13 @@ def upload_doc():
     if not domain:
         return api_error("缺少领域", "BAD_REQUEST", 400)
 
-    content_bytes = file.read()
-    if len(content_bytes) > 10 * 1024 * 1024:
+    max_size_mb = Config.UPLOAD_MAX_SIZE_MB
+    max_size_bytes = max_size_mb * 1024 * 1024
+    # 多读 1 字节即可判定超限，不把一个超大文件完整读入进程内存。
+    content_bytes = file.read(max_size_bytes + 1)
+    if len(content_bytes) > max_size_bytes:
         return api_error(
-            "文件超过 10MB 上限", "FILE_TOO_LARGE", 400
+            f"文件超过 {max_size_mb}MB 上限", "FILE_TOO_LARGE", 400
         )
 
     try:
