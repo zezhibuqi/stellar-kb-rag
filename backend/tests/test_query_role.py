@@ -10,6 +10,7 @@ import order_qa
 import orchestrator
 import rag
 import chat_api
+import models
 from app import create_app
 from models import (
     create_conversation,
@@ -217,3 +218,16 @@ def test_history_only_contains_same_query_role():
         "员工回答",
         "旧消息",
     ]
+
+
+def test_migration_adds_query_role_to_existing_messages_table():
+    """旧库升级时自动补 query_role 列，不需要重建会话表。"""
+    conn = models.get_connection()
+    conn.execute("ALTER TABLE messages DROP COLUMN query_role")
+    conn.commit()
+    models._migrate()
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(messages)").fetchall()
+    }
+    assert "query_role" in columns
