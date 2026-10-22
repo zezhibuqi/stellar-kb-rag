@@ -391,6 +391,8 @@ export interface StoredMessage {
   role: "user" | "assistant";
   content: string;
   mode: string;
+  /** 本条消息使用的查询角色；旧消息可能为 null。 */
+  query_role?: string | null;
   status: "streaming" | "completed" | "failed" | "aborted";
   sources: ChatSource[];
   trace: unknown;
@@ -454,16 +456,23 @@ export interface RawDoc {
 export interface ChatResponse {
   answer: string;
   sources: ChatSource[];
+  message_id?: number;
+  query_role?: string;
 }
 
 /** 非流式问答：仅标准模式使用（增强模式必须流式）。 */
-export function chat(conversationId: number, question: string): Promise<ChatResponse> {
+export function chat(
+  conversationId: number,
+  question: string,
+  queryRole?: string
+): Promise<ChatResponse> {
   return request<ChatResponse>("/api/chat", {
     method: "POST",
     body: JSON.stringify({
       conversation_id: conversationId,
       question,
       stream: false,
+      ...(queryRole ? { query_role: queryRole } : {}),
     }),
   });
 }
@@ -493,6 +502,7 @@ export async function chatStream(
   conversationId: number,
   question: string,
   mode: string,
+  queryRole: string | undefined,
   handlers: ChatStreamHandlers,
   signal?: AbortSignal
 ): Promise<void> {
@@ -510,6 +520,7 @@ export async function chatStream(
       question,
       mode,
       stream: true,
+      ...(queryRole ? { query_role: queryRole } : {}),
     }),
     signal,
   });

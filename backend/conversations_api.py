@@ -42,6 +42,7 @@ def message_payload(message: dict) -> dict:
         "role": message["role"],
         "content": message["content"],
         "mode": message["mode"],
+        "query_role": message.get("query_role"),
         "status": message["status"],
         "sources": _loads(message.get("sources_json")) or [],
         "trace": _loads(message.get("trace_json")),

@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role TEXT NOT NULL,                        -- user | assistant
     content TEXT NOT NULL DEFAULT '',
     mode TEXT NOT NULL DEFAULT 'standard',     -- standard | enhanced
+    query_role TEXT,                           -- 本条消息的查询角色；NULL 表示旧数据
     status TEXT NOT NULL DEFAULT 'completed',  -- streaming | completed | failed | aborted
     sources_json TEXT,                         -- 引用来源数组（含 sub_question_id）
     trace_json TEXT,                           -- 增强模式过程记录
@@ -234,6 +235,12 @@ def _migrate() -> None:
         conn.execute(
             "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"
         )
+    message_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(messages)").fetchall()
+    }
+    if "query_role" not in message_columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN query_role TEXT")
     conn.commit()
 
 
@@ -584,6 +591,7 @@ def create_message(
     role: str,
     content: str = "",
     mode: str = "standard",
+    query_role: str | None = None,
     status: str = "completed",
     sources_json: str | None = None,
     trace_json: str | None = None,
@@ -596,9 +604,18 @@ def create_message(
         raise ValueError(f"非法消息状态：{status}")
     with transaction() as cur:
         cur.execute(
-            "INSERT INTO messages (conversation_id, role, content, mode, status, "
-            "sources_json, trace_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (conversation_id, role, content, mode, status, sources_json, trace_json),
+            "INSERT INTO messages (conversation_id, role, content, mode, query_role, "
+            "status, sources_json, trace_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                conversation_id,
+                role,
+                content,
+                mode,
+                query_role,
+                status,
+                sources_json,
+                trace_json,
+            ),
         )
         return int(cur.lastrowid)
 
@@ -639,7 +656,7 @@ def get_message(message_id: int) -> dict[str, Any] | None:
     """取单条消息（含 mode/status/sources_json/trace_json），用于状态回查。"""
     with transaction() as cur:
         row = cur.execute(
-            "SELECT id, conversation_id, role, content, mode, status, "
+            "SELECT id, conversation_id, role, content, mode, query_role, status, "
             "sources_json, trace_json, created_at FROM messages WHERE id = ?",
             (message_id,),
         ).fetchone()
@@ -650,26 +667,42 @@ def list_messages(conversation_id: int) -> list[dict[str, Any]]:
     """按写入顺序取会话全部消息，供前端回放（含失败/中断的部分内容）。"""
     with transaction() as cur:
         rows = cur.execute(
-            "SELECT id, role, content, mode, status, sources_json, trace_json, "
+            "SELECT id, role, content, mode, query_role, status, sources_json, trace_json, "
             "created_at FROM messages WHERE conversation_id = ? ORDER BY id",
             (conversation_id,),
         ).fetchall()
         return [dict(row) for row in rows]
 
 
-def recent_context_messages(conversation_id: int, turns: int) -> list[dict[str, Any]]:
+def recent_context_messages(
+    conversation_id: int,
+    turns: int,
+    query_role: str | None = None,
+    actual_role: str | None = None,
+) -> list[dict[str, Any]]:
     """最近 N 轮的问答文本（按时间正序），供服务端拼上下文。
 
-    只取已完成且内容非空的消息；失败与中断的消息不计入。
+    只取已完成且内容非空的消息；失败与中断的消息不计入。管理员模拟查询角色时，
+    只返回同一查询角色的消息，避免上一角色的答案串入本轮模型上下文。旧消息没有
+    query_role：当查询角色等于账号实际角色时视为历史有效消息，模拟其他角色时排除。
     """
     limit = max(turns, 0) * 2
     if limit == 0:
         return []
+    role_clause = ""
+    params: list[Any] = [conversation_id]
+    if query_role:
+        if actual_role == query_role:
+            role_clause = " AND (query_role = ? OR query_role IS NULL)"
+        else:
+            role_clause = " AND query_role = ?"
+        params.append(query_role)
+    params.append(limit)
     with transaction() as cur:
         rows = cur.execute(
             "SELECT id, role, content FROM messages "
             "WHERE conversation_id = ? AND status = 'completed' AND content <> '' "
-            "ORDER BY id DESC LIMIT ?",
-            (conversation_id, limit),
+            f"{role_clause} ORDER BY id DESC LIMIT ?",
+            params,
         ).fetchall()
         return [dict(row) for row in reversed(rows)]
