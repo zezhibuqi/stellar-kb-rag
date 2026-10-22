@@ -141,10 +141,13 @@ def expand_evidence_unit(
     parent_end_line: int | None,
     hit_start_line: int | None = None,
     max_chars: int | None = None,
+    matched_text: str | None = None,
 ) -> str:
     """按证据单元行区间从原文档（documents.source_content）切片展开。
 
-    超过 max_chars 时以命中段为中心向两侧扩展，只添加整行，不切断行。
+    超过 max_chars 时以命中段为中心向两侧扩展，只添加整行，不切断行。章节
+    元数据可能与命中行错位（如 parent_end_line < start_line）；此时用命中文本的
+    行数兜底扩张区间，保证展开内容一定覆盖实际命中的 chunk。
     """
     from models import get_document
 
@@ -159,6 +162,12 @@ def expand_evidence_unit(
     total = len(lines)
     start = max(1, int(parent_start_line or 1))
     end = min(total, int(parent_end_line or total))
+    if hit_start_line:
+        hit_start = min(total, max(1, int(hit_start_line)))
+        hit_line_count = max(1, (matched_text or "").count("\n") + 1)
+        hit_end = min(total, hit_start + hit_line_count - 1)
+        start = min(start, hit_start)
+        end = max(end, hit_end)
     if end < start:
         return ""
 

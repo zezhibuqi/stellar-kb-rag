@@ -73,8 +73,8 @@ class Config:
     # 重排后保留的候选数：实测目标块可能排在密集召回的 8~10 名，
     # 留太窄会在重排阶段被挤掉（它是候选生成之后、注入之前的最后一道闸）
     AGENT_RERANK_TOP_N = int(os.getenv("AGENT_RERANK_TOP_N", "12"))
-    # 增强模式的向量召回条数：比标准模式大，缓解超大文档（如 600KB 年报
-    # 切出 500+ 块）里具体句子挤不进候选集的问题；重排仍只取少量候选。
+    # 标准/增强/评测共用的向量召回条数：缓解超大文档（如 600KB 年报切出
+    # 500+ 块）里具体句子挤不进候选集的问题；重排仍只取少量候选。
     AGENT_RETRIEVE_K = int(os.getenv("AGENT_RETRIEVE_K", "30"))
     # 关键词通道（ADR 0010）：两路各自召回后按 RRF 融合
     AGENT_KEYWORD_TOP_K = int(os.getenv("AGENT_KEYWORD_TOP_K", "80"))

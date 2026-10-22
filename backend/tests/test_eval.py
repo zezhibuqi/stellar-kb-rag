@@ -6,7 +6,8 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-from eval import evaluate
+import rag
+from eval import RAGPipelineForEval, evaluate
 
 
 def test_golden_set_coverage():
@@ -22,6 +23,14 @@ def test_golden_set_coverage():
         assert item["question"]
         assert item["answer_must_contain"]
         assert item["source_file"]
+
+    sc100_density = next(
+        item
+        for item in golden
+        if item["domain"] == "product"
+        and item["question"] == "SC-100电池的单体能量密度（质量）是多少？"
+    )
+    assert sc100_density["answer_must_contain"] == ["180 Wh/kg"]
 
 
 def _doc(content: str) -> Document:
@@ -67,3 +76,31 @@ def test_evaluate_hit_rate_and_mrr():
     assert overall == {"hit_rate": 1.0, "mrr": (1 + 1 / 3) / 2}
     assert domain_stats["finance"]["total"] == 2
     assert domain_stats["finance"]["hit_rate"] == 1.0
+
+
+def test_eval_pipeline_uses_standard_hybrid_search(monkeypatch):
+    """评测管线复用标准模式的混合检索入口，而不是另走纯向量路径。"""
+    captured: dict = {}
+
+    def fake_search(question: str, user_role: str):
+        """替身：记录评测调用查询的角色与问题。"""
+        captured["question"] = question
+        captured["user_role"] = user_role
+        return [
+            {
+                "text": "证据单元原文",
+                "doc_id": 7,
+                "chunk_id": 2,
+                "filename": "f.md",
+                "domain": "product",
+                "start_line": 12,
+                "parent_start_line": 10,
+                "parent_end_line": 20,
+            }
+        ]
+
+    monkeypatch.setattr(rag, "hybrid_search_with_permission", fake_search)
+    docs = RAGPipelineForEval().retrieve("产品问题")
+    assert captured == {"question": "产品问题", "user_role": "admin"}
+    assert docs[0].page_content == "证据单元原文"
+    assert docs[0].metadata["doc_id"] == 7

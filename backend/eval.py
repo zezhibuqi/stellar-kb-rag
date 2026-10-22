@@ -1,4 +1,4 @@
-"""RAG 评测脚本（设计文档 10.3）：无权限过滤、全领域 Top-10 → Reranker → Top-5。"""
+"""RAG 评测脚本：与标准模式共用混合检索，以 admin 查询角色覆盖全部领域。"""
 
 import argparse
 import json
@@ -7,28 +7,39 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
-import chroma_store
-from reranker import SiliconFlowReranker
+import rag
 
 TARGET_HIT_RATE = 0.8
 TARGET_MRR = 0.5
 # 报告头部的「数据版本」标注。这行无法从库里推导，写硬了就会谎报：数据清洗、重灌或
 # 设计/开发文档升版后，记得同步这个默认值，或在命令行用 --data-version 当场覆盖。
-DEFAULT_DATA_VERSION = "项目设计文档 V2.1 / 项目开发文档 V2.0"
+DEFAULT_DATA_VERSION = "项目设计文档 V2.2 / 项目开发文档 V2.0"
 
 
 class RAGPipelineForEval:
-    """评测专用 RAG 管线：不做权限过滤，全领域检索。"""
+    """评测专用 RAG 管线：与标准模式共用混合检索，admin 覆盖全部领域。"""
 
     def __init__(self):
-        """固定 top_n=5，与线上标准模式的 RERANK_TOP_N 保持一致，避免口径漂移。"""
-        self.reranker = SiliconFlowReranker(top_n=5)
+        """使用 admin 查询角色，等价于不做领域限制的全领域评测。"""
 
     def retrieve(self, question: str) -> list[Document]:
-        """评测检索路径：全领域召回 k=10 → 重排取 5（**不做权限过滤**，评测专用）。"""
-        candidates = chroma_store.similarity_search(question, k=10)
-        reranked = self.reranker.compress_documents(candidates, question)
-        return list(reranked)[:5]
+        """调用标准模式同一混合检索入口，并把证据单元转成评测所需 Document。"""
+        items = rag.hybrid_search_with_permission(question, "admin")
+        return [
+            Document(
+                page_content=item.get("text", ""),
+                metadata={
+                    "doc_id": item.get("doc_id"),
+                    "chunk_id": item.get("chunk_id"),
+                    "filename": item.get("filename"),
+                    "domain": item.get("domain"),
+                    "start_line": item.get("start_line"),
+                    "parent_start_line": item.get("parent_start_line"),
+                    "parent_end_line": item.get("parent_end_line"),
+                },
+            )
+            for item in items
+        ]
 
 
 def evaluate(golden_set: list[dict], rag_pipeline) -> tuple[dict, dict]:

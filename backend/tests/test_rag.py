@@ -3,7 +3,6 @@
 import json
 
 import pytest
-from langchain_core.documents import Document
 
 import chroma_store
 import embeddings
@@ -137,6 +136,47 @@ def test_stream_sse_format(monkeypatch, client):
     assert done[0]["sources"][0]["domain"] == "finance"
 
 
+def test_sources_use_matched_chunk_while_prompt_uses_evidence(monkeypatch, client):
+    """引用预览锚定命中 chunk，模型提示词使用展开后的证据单元。"""
+    matched_text = "命中块" * 20
+    evidence_text = matched_text + "\n展开后的整张表内容"
+    captured: dict = {}
+    monkeypatch.setattr(
+        rag,
+        "hybrid_search_with_permission",
+        lambda *a, **k: [
+            {
+                "filename": "f.md",
+                "domain": "finance",
+                "doc_id": 1,
+                "chunk_id": 2,
+                "chunk_type": "table",
+                "start_line": 10,
+                "matched_text": matched_text,
+                "text": evidence_text,
+            }
+        ],
+    )
+
+    def fake_invoke(prompt, **kwargs):
+        """记录标准模式实际发送给模型的上下文。"""
+        captured["prompt"] = prompt
+        return "回答"
+
+    monkeypatch.setattr(rag.llm, "invoke", fake_invoke)
+    token = _login(client)
+    response = client.post(
+        "/api/chat",
+        headers=_headers(token),
+        json={"question": "表格中的值是多少？"},
+    )
+    assert response.status_code == 200
+    assert "展开后的整张表内容" in captured["prompt"]
+    source = response.get_json()["sources"][0]
+    assert source["content_preview"] == matched_text[:200]
+    assert "展开后的整张表内容" not in source["content_preview"]
+
+
 def test_employee_cannot_get_finance_content(monkeypatch, client):
     """越权检索：employee 问财务问题拿不到 finance 来源，admin 可以拿到。"""
     _seed_docs(
@@ -169,7 +209,9 @@ def test_employee_cannot_get_finance_content(monkeypatch, client):
 
 def test_no_material_returns_fixed_answer(monkeypatch, client):
     """检索为空时返回固定话术且不调用 LLM（sources 为空）。"""
-    monkeypatch.setattr(rag, "search_with_permission", lambda *a, **k: [])
+    monkeypatch.setattr(
+        rag, "hybrid_search_with_permission", lambda *a, **k: []
+    )
     token = _login(client)
     resp = client.post(
         "/api/chat",
@@ -185,22 +227,11 @@ def test_no_material_returns_fixed_answer(monkeypatch, client):
 
 def test_reranker_failure_returns_500(monkeypatch, client):
     """重排失败不降级：返回 500 与 RERANKER_ERROR，并落一条 failed 消息。"""
-    monkeypatch.setattr(
-        rag,
-        "search_with_permission",
-        lambda *a, **k: [
-            Document(
-                page_content="内容",
-                metadata={"doc_id": 1, "domain": "finance", "filename": "f.md"},
-            )
-        ],
-    )
-
-    def broken_rerank(*args, **kwargs):
-        """替身：抛 RerankerError。"""
+    def broken_search(*args, **kwargs):
+        """替身：混合检索中的重排失败继续向上抛出。"""
         raise RerankerError("Reranker API 调用失败")
 
-    monkeypatch.setattr(rag, "rerank_top_n", broken_rerank)
+    monkeypatch.setattr(rag, "hybrid_search_with_permission", broken_search)
     token = _login(client)
     resp = client.post(
         "/api/chat",

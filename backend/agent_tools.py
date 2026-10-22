@@ -48,6 +48,9 @@ def _candidate(
         "parent_start_line": parent_start_line,
         "parent_end_line": parent_end_line,
         "text": text or "",
+        # 来源预览与原文定位必须继续使用最初命中的 chunk；text 在后续会替换成
+        # 展开后的证据单元供模型阅读。
+        "matched_text": text or "",
     }
 
 
@@ -219,8 +222,16 @@ def build_knowledge_search(
                 candidate.get("parent_start_line"),
                 candidate.get("parent_end_line"),
                 candidate.get("start_line"),
+                matched_text=candidate.get("matched_text"),
             )
-            items.append({**candidate, "text": text or candidate.get("text", "")})
+            items.append(
+                {
+                    **candidate,
+                    "text": text or candidate.get("text", ""),
+                    "matched_text": candidate.get("matched_text")
+                    or candidate.get("text", ""),
+                }
+            )
             if len(items) >= limit:
                 break
 

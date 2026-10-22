@@ -65,6 +65,8 @@ def test_knowledge_search_returns_expanded_evidence_unit():
     assert item["parent_type"] == "table"
     # 注入的是证据单元（整张表），不是带回前缀的切块文本
     assert item["text"] == "| 项目 | 值 |\n|---|---|\n| 净利润 | 1688 |"
+    # 引用预览仍使用命中 chunk 的原始文本（含检索前缀）
+    assert item["matched_text"] == "## 财务摘要\n| 项目 | 值 |\n|---|---|\n| 净利润 | 1688 |"
 
 
 def test_knowledge_search_dedupes_same_evidence_unit(monkeypatch):

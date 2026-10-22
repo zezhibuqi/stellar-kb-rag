@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 import chroma_store
 import llm
 import order_qa
+from config import Config
 from models import get_allowed_domains
 from reranker import SiliconFlowReranker
 
@@ -97,6 +98,41 @@ def build_sources(documents: Sequence) -> list[dict]:
     ]
 
 
+def build_hybrid_sources(items: Sequence[dict]) -> list[dict]:
+    """把混合检索候选转换为引用来源。
+
+    content_preview 取最初命中的 chunk，而不是展开后的证据单元：前者用于定位与
+    核对，后者只进入模型上下文，两者共用同一次检索结果。
+    """
+    return [
+        {
+            "source_type": "vector",
+            "filename": item.get("filename", ""),
+            "domain": item.get("domain", ""),
+            "content_preview": (
+                item.get("matched_text") or item.get("text") or ""
+            )[:200],
+            "doc_id": item.get("doc_id"),
+            "chunk_id": item.get("chunk_id"),
+            "chunk_type": item.get("chunk_type"),
+            "start_line": item.get("start_line"),
+        }
+        for item in items
+    ]
+
+
+def hybrid_search_with_permission(query: str, user_role: str) -> list[dict]:
+    """标准模式与评测共用的混合检索入口。
+
+    返回最多 5 个候选，每项同时带命中 chunk（matched_text）和展开证据（text）。
+    在函数内导入 agent_tools，避免它与本模块的重排函数形成顶层循环依赖。
+    """
+    from agent_tools import build_knowledge_search
+
+    search = build_knowledge_search(user_role, k=Config.AGENT_RETRIEVE_K)
+    return list(search(query).get("items") or [])
+
+
 def _join_prefix(*parts: str) -> str:
     """拼接多个前缀话术（如「越权提示」+「路由回退提示」），自动跳过空串。"""
     return "\n\n".join(part for part in parts if part)
@@ -178,14 +214,13 @@ def answer_question(
     vector_sources: list = []
     knowledge_context = ""
     if intent in ("knowledge", "mixed"):
-        candidates = search_with_permission(question, user_role, k=DEFAULT_TOP_K)
-        top5 = rerank_top_n(candidates, question, top_n=RERANK_TOP_N)
+        top5 = hybrid_search_with_permission(question, user_role)
         if route.get("fallback"):
             fallback_prefix = order_qa.ROUTER_FALLBACK_PREFIX
         if top5:
-            vector_sources = build_sources(top5)
+            vector_sources = build_hybrid_sources(top5)
             knowledge_context = "\n\n---\n\n".join(
-                doc.page_content for doc in top5
+                item.get("text", "") for item in top5
             )
 
     prefix = _join_prefix(refusal_prefix, fallback_prefix)

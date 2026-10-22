@@ -17,6 +17,8 @@ import {
   Grid,
   Input,
   Segmented,
+  Select,
+  Tag,
   Tooltip,
   Typography,
   message,
@@ -32,6 +34,7 @@ import {
   chatStream,
   createConversation,
   getModelSettings,
+  getStoredUser,
   listConversationMessages,
   type ChatSource,
   type ConversationInfo,
@@ -39,6 +42,16 @@ import {
 } from "@/lib/api";
 
 const STICK_THRESHOLD = 120; // 距底小于该像素值时视为「贴底」，流式输出自动跟随
+const ROLE_OPTIONS = [
+  { value: "admin", label: "管理员" },
+  { value: "employee", label: "普通员工" },
+  { value: "finance", label: "财务" },
+  { value: "aftersale", label: "售后" },
+  { value: "sales", label: "销售" },
+];
+const ROLE_LABELS = Object.fromEntries(
+  ROLE_OPTIONS.map((option) => [option.value, option.label])
+);
 
 interface ChatItem {
   /** 展示用的消息（用户消息或助手回答）；助手项会随时间被增量刷新。 */
@@ -48,6 +61,8 @@ interface ChatItem {
   sources?: ChatSource[];
   /** 该条消息使用的模式（standard / enhanced），回放时来自消息记录。 */
   mode?: string;
+  /** 该条消息使用的查询角色（管理员可在同一会话内切换）。 */
+  queryRole?: string;
   /** 增强模式：规划阶段标记（显示「正在分析问题…」）。 */
   planning?: boolean;
   /** 增强模式：子问题与覆盖状态（流式期间逐条填充，回放时从 trace 还原）。 */
@@ -103,6 +118,8 @@ function replayContent(item: StoredMessage): string {
  * 组件内不做权限判断（除模式可用性提示外），越权与模式校验一律由服务端返回的错误码决定。
  */
 export default function ChatBox() {
+  const currentUser = getStoredUser();
+  const isAdmin = currentUser?.role === "admin";
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [items, setItems] = useState<ChatItem[]>([]);
   const [input, setInput] = useState("");
@@ -110,6 +127,7 @@ export default function ChatBox() {
   const [listToken, setListToken] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mode, setMode] = useState("standard");
+  const [queryRole, setQueryRole] = useState("admin");
   const [agentCapable, setAgentCapable] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -160,6 +178,7 @@ export default function ChatBox() {
           content: replayContent(item),
           sources: item.sources,
           mode: item.mode,
+          queryRole: item.query_role ?? currentUser?.role,
           subProcess: traceProcess(item),
         }))
       );
@@ -168,7 +187,7 @@ export default function ChatBox() {
         error instanceof ApiRequestError ? error.message : "加载会话失败"
       );
     }
-  }, []);
+  }, [currentUser?.role]);
 
   const autoSelected = useRef(false);
 
@@ -204,11 +223,12 @@ export default function ChatBox() {
     // 乐观插入：先把用户消息与一条空的助手消息放进列表，后续 token 增量填充最后一条
     const question = input.trim();
     if (!question || loading || conversationId === null) return;
+    const activeQueryRole = isAdmin ? queryRole : currentUser?.role;
 
     setItems((prev) => [
       ...prev,
-      { role: "user", content: question },
-      { role: "assistant", content: "" },
+      { role: "user", content: question, queryRole: activeQueryRole },
+      { role: "assistant", content: "", queryRole: activeQueryRole },
     ]);
     setInput("");
     setLoading(true);
@@ -236,6 +256,7 @@ export default function ChatBox() {
         conversationId,
         question,
         mode,
+        isAdmin ? queryRole : undefined,
         {
           onToken: (token) => {
             answer += token;
@@ -409,6 +430,15 @@ export default function ChatBox() {
                     <div className="chat-user-bubble">{item.content}</div>
                   ) : (
                     <>
+                      {item.queryRole && (
+                        <Tag
+                          color={item.queryRole === "admin" ? "blue" : "default"}
+                          style={{ marginBottom: 8 }}
+                        >
+                          查询角色：
+                          {ROLE_LABELS[item.queryRole] ?? item.queryRole}
+                        </Tag>
+                      )}
                       <AnalysisPanel
                         subQuestions={item.subProcess ?? []}
                         planning={item.planning}
@@ -431,7 +461,15 @@ export default function ChatBox() {
         </div>
 
         <div style={{ flex: "none", padding: "12px 0 8px" }}>
-          <div style={{ marginBottom: 8 }}>
+          <div
+            style={{
+              marginBottom: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
             <Tooltip
               title={
                 agentCapable === false
@@ -453,6 +491,22 @@ export default function ChatBox() {
                 ]}
               />
             </Tooltip>
+            {isAdmin && (
+              <>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  查询角色
+                </Typography.Text>
+                <Select
+                  size="small"
+                  value={queryRole}
+                  disabled={loading}
+                  onChange={setQueryRole}
+                  options={ROLE_OPTIONS}
+                  style={{ width: 124 }}
+                  aria-label="查询角色"
+                />
+              </>
+            )}
           </div>
           <div className="chat-input-card">
             <Input.TextArea

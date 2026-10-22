@@ -779,7 +779,11 @@ def collect_sources(sub_results: list[dict]) -> list[dict]:
                     "source_type": "vector",
                     "filename": evidence.get("filename", ""),
                     "domain": evidence.get("domain", ""),
-                    "content_preview": (evidence.get("text") or "")[:200],
+                    "content_preview": (
+                        evidence.get("matched_text")
+                        or evidence.get("text")
+                        or ""
+                    )[:200],
                     "doc_id": evidence.get("doc_id"),
                     "chunk_id": evidence.get("chunk_id"),
                     "chunk_type": evidence.get("chunk_type"),

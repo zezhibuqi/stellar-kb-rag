@@ -18,6 +18,7 @@ from errors import api_error
 import llm
 import orchestrator
 from models import (
+    ROLE_VALUES,
     create_message,
     list_messages,
     recent_context_messages,
@@ -31,6 +32,28 @@ from reranker import RerankerError
 chat_bp = Blueprint("chat", __name__, url_prefix="/api")
 
 SUPPORTED_MODES = ("standard", "enhanced")
+
+
+def _resolve_query_role(data: dict) -> tuple[str | None, tuple | None]:
+    """解析管理员查询角色；返回 (角色, 错误响应)。
+
+    查询角色只决定知识检索与订单查询的访问范围，不改变登录身份。非管理员完全
+    不能使用该参数；管理员省略时默认使用 admin。
+    """
+    if g.user["role"] != "admin":
+        if "query_role" in data:
+            return None, api_error(
+                "只有管理员可以指定查询角色", "QUERY_ROLE_FORBIDDEN", 403
+            )
+        return g.user["role"], None
+
+    raw = data.get("query_role", "admin")
+    if not isinstance(raw, str):
+        return None, api_error("查询角色格式非法", "BAD_REQUEST", 400)
+    query_role = raw.strip() or "admin"
+    if query_role not in ROLE_VALUES:
+        return None, api_error("查询角色不存在", "BAD_REQUEST", 400)
+    return query_role, None
 
 
 def _sse(payload: dict) -> str:
@@ -86,6 +109,10 @@ def chat():
         return api_error(f"暂不支持的模式：{mode}", "MODE_UNAVAILABLE", 400)
 
     stream = bool(data.get("stream", False))
+    query_role, query_role_error = _resolve_query_role(data)
+    if query_role_error is not None:
+        return query_role_error
+
     if mode == "enhanced":
         if not llm.get_active_provider().agent_capable:
             return api_error(
@@ -97,8 +124,15 @@ def chat():
             )
 
     # 上下文由服务端从会话消息中截取，不再接收前端 history
-    history = recent_context_messages(conversation_id, Config.CHAT_HISTORY_TURNS)
-    create_message(conversation_id, "user", question, mode=mode)
+    history = recent_context_messages(
+        conversation_id,
+        Config.CHAT_HISTORY_TURNS,
+        query_role=query_role,
+        actual_role=g.user["role"],
+    )
+    create_message(
+        conversation_id, "user", question, mode=mode, query_role=query_role
+    )
     if not conversation["title"]:
         update_conversation_title(conversation_id, question[:20])
     touch_conversation(conversation_id)
@@ -108,20 +142,34 @@ def chat():
         if mode == "enhanced":
             trace = {}
             result = orchestrator.run_enhanced(
-                question, g.user["role"], history, trace
+                question, query_role, history, trace
             )
         else:
             result = answer_question(
                 question,
                 history=history,
-                user_role=g.user["role"],
+                user_role=query_role,
                 stream=stream,
             )
     except RerankerError as exc:
-        create_message(conversation_id, "assistant", "", mode=mode, status="failed")
+        create_message(
+            conversation_id,
+            "assistant",
+            "",
+            mode=mode,
+            query_role=query_role,
+            status="failed",
+        )
         return api_error(str(exc) or "重排服务异常", "RERANKER_ERROR", 500)
     except Exception as exc:  # noqa: BLE001 - 兜底保证统一错误格式
-        create_message(conversation_id, "assistant", "", mode=mode, status="failed")
+        create_message(
+            conversation_id,
+            "assistant",
+            "",
+            mode=mode,
+            query_role=query_role,
+            status="failed",
+        )
         return api_error(str(exc) or "服务器内部错误", "INTERNAL_ERROR", 500)
 
     if not stream:
@@ -130,13 +178,21 @@ def chat():
             "assistant",
             result.get("answer", ""),
             mode=mode,
+            query_role=query_role,
             status="completed",
             sources_json=json.dumps(result.get("sources") or [], ensure_ascii=False),
         )
-        return jsonify({**result, "message_id": message_id})
+        return jsonify(
+            {**result, "message_id": message_id, "query_role": query_role}
+        )
 
     message_id = create_message(
-        conversation_id, "assistant", "", mode=mode, status="streaming"
+        conversation_id,
+        "assistant",
+        "",
+        mode=mode,
+        query_role=query_role,
+        status="streaming",
     )
 
     def generate():
@@ -144,7 +200,9 @@ def chat():
         parts: list[str] = []
         sources: list = []
         status = "aborted"
-        yield _sse({"message_id": message_id, "mode": mode})
+        yield _sse(
+            {"message_id": message_id, "mode": mode, "query_role": query_role}
+        )
         try:
             for event in result:
                 payload = json.loads(event) if event.strip().startswith("{") else {}

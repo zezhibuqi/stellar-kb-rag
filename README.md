@@ -13,9 +13,10 @@
 - **多领域知识覆盖**：财务数据、规章制度、产品规格、售后政策、公共知识
 - **细粒度权限控制**：5 类角色（普通员工、财务、销售、售后、管理员），按角色自动过滤可访问领域
 - **混合检索增强**：向量检索（bge-m3）+ 重排序（bge-reranker-v2-m3），提升答案准确性
-- **双通道检索（增强模式）**：向量通道与 BM25 关键词通道（SQLite FTS5 + trigram，专治型号、数字等字面目标）并行召回，按 RRF 融合后再重排；关键词索引随灌库增量维护，`/api/health` 暴露未入索引的文档数
+- **双通道混合检索**：标准模式、增强模式与检索评测共用向量 + BM25 关键词通道（SQLite FTS5 + trigram，专治型号、数字等字面目标），按 RRF 融合后重排；关键词索引随灌库增量维护，`/api/health` 暴露未入索引的文档数
 - **增强模式（编排式问答）**：把问题拆成可独立检索的子问题并行作答，再做有界第二轮补充检索（链式延伸 + 缺口补查），最后逐项合成；前端「分析过程」容器实时展示子问题与证据覆盖，来源按子问题分组；仅支持流式，且要求当前模型具备 `agent_capable`
 - **会话与消息**：每用户最多保留 5 个会话，上下文由服务端统一截取最近 10 轮；消息带模式与状态（`streaming` / `completed` / `failed` / `aborted`），可回放分析与来源
+- **管理员查询角色模拟**：管理员可在问答页切换 `admin` / `employee` / `finance` / `sales` / `aftersale` 查询角色，在不切换账号的情况下演示知识领域与订单权限隔离；登录身份和管理员后台权限不变，模型历史按查询角色隔离
 - **结构化表格处理**：Markdown 表格完整保留，避免切片破坏语义
 - **智能问答生成**：基于 LLM 生成回答，支持流式（SSE）输出；生成失败显式提示而非静默断流
 - **管理员可切换模型**：预设提供方注册表（OpenAI 兼容协议，内置 DeepSeek 官方、硅基流动、小米平台的 4 个模型），界面切换当前模型并即时生效，支持连通性测试；思考型模型的推理预算与 `response_format` 兼容性在注册表中按提供方声明
@@ -82,7 +83,7 @@ stellar-kb-rag/
 │   ├── demo_retrieve.py    # 离线检索演示脚本（权限过滤 + 重排）
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（233 个用例）
+│   └── tests/              # 自动化测试（244 个用例）
 ├── frontend/
 │   ├── app/                # login / chat / knowledge / users / viewer / orders / settings 页面
 │   ├── components/         # LayoutWrapper / ChatBox / ConversationList / AnalysisPanel / SourceCard / ThemeProvider
@@ -186,7 +187,7 @@ npm.cmd run dev   # 其他平台用 npm run dev
 |:------ |:--------------------------- |:------------------------ |:--------------- |
 | POST   | `/api/auth/login`           | 登录                       | 公开              |
 | GET    | `/api/auth/me`              | 获取当前用户信息                 | 已登录             |
-| POST   | `/api/chat`                 | 问答（支持流式 SSE）             | 已登录             |
+| POST   | `/api/chat`                 | 问答（支持流式 SSE；管理员可传 `query_role`） | 已登录             |
 | GET    | `/api/conversations`        | 我的会话列表                   | 已登录             |
 | POST   | `/api/conversations`        | 新建会话（每用户上限 5 个）          | 已登录             |
 | GET    | `/api/conversations/:id/messages` | 回放会话消息（含来源与过程记录）    | 仅本人会话           |
@@ -235,7 +236,7 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（233 个用例）
+# 单元/接口/评测逻辑测试（244 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）
@@ -256,7 +257,7 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 
 当前评测结果（报告均在 `docs/` 下，各自标注评测日期）：
 
-- 检索质量（现行）：Hit Rate 88.00%、MRR 0.8200（2026-10-22，`docs/eval_report.md`，达标；未达标领域 product 66.67%，改进计划见该报告）。上一版为 Hit Rate 88.00%、MRR 0.8322（2026-08-07，已存档于 `docs/eval_report_2026-08-07.md`）：两版之间《2025年度报告.md》做过 HTML→GFM 表格清洗并重灌（该篇 510→704 块、全库 671→865 块），索引构成不同，分领域数字不可直接比较（finance 93.33%→100%、common 93.33%→80% 的成因见该报告与 ADR 0010「单文档挤占」一节）。另有一份 2026-08-26 的检索对照 Hit Rate 89.33%、MRR 0.8356（`docs/model_comparison_report.md`，对应清洗前的索引，仅作历史对照）。
+- 检索质量（现行）：Hit Rate 97.33%、MRR 0.9004（2026-10-22，`docs/eval_report.md`）。标准模式与评测统一改用混合检索，并修正 SC-100 单体能量密度 Golden Set 值（165→180 Wh/kg）；product 从 66.67% 提升到 100%，全领域均达到目标。此前同索引的纯向量口径为 Hit Rate 88.00%、MRR 0.8200；2026-08-07 存档为 88.00%、0.8322（`docs/eval_report_2026-08-07.md`，清洗前索引，仅作历史对照）。
 - 订单结构化问答：答案正确率 95.24%、路由准确率 100%（2026-08-20，`docs/eval_orders_report.md`）。
 - 多模型对比：订单答案正确率 90.48%~100%、路由准确率 95.24%~100%、平均首 token 延迟 0.74s~14.84s（2026-08-26，`docs/model_comparison_report.md`）。
 

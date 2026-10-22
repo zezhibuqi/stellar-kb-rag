@@ -221,6 +221,22 @@ def test_evidence_unit_expansion_truncates_around_hit():
     assert len(text) <= 100
 
 
+def test_evidence_unit_expansion_always_covers_hit_chunk():
+    """章节区间与命中行错位时，展开仍必须覆盖命中 chunk 的原文。"""
+    md = "\n".join(f"第{i}行的内容" for i in range(1, 31))
+    doc_id = create_document("错位章节.md", "common", source_content=md)
+    matched_text = "第12行的内容\n第13行的内容\n第14行的内容"
+    text = expand_evidence_unit(
+        doc_id,
+        1,
+        5,
+        hit_start_line=12,
+        matched_text=matched_text,
+    )
+    assert "第12行的内容" in text
+    assert "第14行的内容" in text
+
+
 def test_evidence_unit_expansion_missing_document():
     """文档不存在时返回空串，不抛异常（删除后残留引用的兜底）。"""
     assert expand_evidence_unit(9999, 1, 10, 1) == ""

@@ -9,6 +9,7 @@ import chroma_store
 import embeddings
 import tasks
 from app import create_app
+from config import Config
 from models import get_connection
 
 
@@ -95,15 +96,26 @@ def test_upload_status_flow_and_chunk_count(client, monkeypatch):
 
 
 def test_upload_validations(client):
-    """上传校验：非 .md、未知领域、超过 10MB 分别返回 400/400/FILE_TOO_LARGE。"""
+    """上传校验：非 .md、未知领域分别返回 400。"""
     headers = _admin_headers(client)
     assert _upload(client, headers, filename="notes.txt").status_code == 400
     assert _upload(client, headers, domain="unknown").status_code == 400
 
-    big = "x" * (10 * 1024 * 1024 + 1)
+
+def test_upload_size_limit_comes_from_config(client, monkeypatch):
+    """上传大小读取 UPLOAD_MAX_SIZE_MB，并包含恰好等于上限的边界。"""
+    monkeypatch.setattr(Config, "UPLOAD_MAX_SIZE_MB", 1)
+    headers = _admin_headers(client)
+    at_limit = "x" * (1024 * 1024)
+    accepted = _upload(client, headers, filename="at-limit.md", content=at_limit)
+    assert accepted.status_code == 202
+    _poll_status(client, headers, accepted.get_json()["doc_id"])
+
+    big = "x" * (1024 * 1024 + 1)
     resp = _upload(client, headers, filename="big.md", content=big)
     assert resp.status_code == 400
     assert resp.get_json()["code"] == "FILE_TOO_LARGE"
+    assert "1MB" in resp.get_json()["error"]
 
 
 def test_failure_sets_failed_with_error(client, monkeypatch):
