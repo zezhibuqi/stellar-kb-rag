@@ -12,6 +12,9 @@ from reranker import SiliconFlowReranker
 
 TARGET_HIT_RATE = 0.8
 TARGET_MRR = 0.5
+# 报告头部的「数据版本」标注。这行无法从库里推导，写硬了就会谎报：数据清洗、重灌或
+# 设计/开发文档升版后，记得同步这个默认值，或在命令行用 --data-version 当场覆盖。
+DEFAULT_DATA_VERSION = "项目设计文档 V2.1 / 项目开发文档 V2.0"
 
 
 class RAGPipelineForEval:
@@ -69,14 +72,18 @@ def generate_report(
     domain_stats: dict,
     golden_path: str,
     report_path: str,
+    data_version: str = DEFAULT_DATA_VERSION,
 ) -> None:
-    """渲染 Markdown 评测报告：总体指标 + 分领域 + 未达标领域的改进计划。"""
+    """渲染 Markdown 评测报告：总体指标 + 分领域 + 未达标领域的改进计划。
+
+    data_version 只负责标注评测时的文档与数据版本，不参与任何计算。
+    """
     total_questions = sum(stats["total"] for stats in domain_stats.values())
     lines = [
         "# RAG 评测报告",
         "",
         f"- 评测日期：{date.today().isoformat()}",
-        "- 数据版本：项目设计文档 V1.9 / 项目开发文档 V1.0",
+        f"- 数据版本：{data_version}",
         f"- Golden Set：{total_questions} 条（{golden_path}）",
         f"- 目标：Hit Rate ≥ {TARGET_HIT_RATE:.0%}，MRR ≥ {TARGET_MRR:.2f}",
         "",
@@ -148,11 +155,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="RAG 检索质量评测")
     parser.add_argument("--golden", default="docs/golden_set.json")
     parser.add_argument("--report", default="docs/eval_report.md")
+    parser.add_argument(
+        "--data-version",
+        default=DEFAULT_DATA_VERSION,
+        help="写入报告头部的数据版本标注（数据清洗、重灌或文档升版后请同步）",
+    )
     args = parser.parse_args()
 
     golden = json.loads(Path(args.golden).read_text(encoding="utf-8"))
     overall, domain_stats = evaluate(golden, RAGPipelineForEval())
-    generate_report(overall, domain_stats, args.golden, args.report)
+    generate_report(
+        overall, domain_stats, args.golden, args.report, args.data_version
+    )
     print(
         json.dumps(
             {"overall": overall, "per_domain": domain_stats},

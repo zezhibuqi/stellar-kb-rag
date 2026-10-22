@@ -82,7 +82,7 @@ stellar-kb-rag/
 │   ├── demo_retrieve.py    # 离线检索演示脚本（权限过滤 + 重排）
 │   ├── data/               # 运行时数据（app.db/chroma，gitignored；原文档全文存于 app.db）
 │   ├── markdown_src/       # 源 Markdown（按领域分目录，gitignored）
-│   └── tests/              # 自动化测试（232 个用例）
+│   └── tests/              # 自动化测试（233 个用例）
 ├── frontend/
 │   ├── app/                # login / chat / knowledge / users / viewer / orders / settings 页面
 │   ├── components/         # LayoutWrapper / ChatBox / ConversationList / AnalysisPanel / SourceCard / ThemeProvider
@@ -235,7 +235,7 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 ## 测试与评测
 
 ```bash
-# 单元/接口/评测逻辑测试（232 个用例）
+# 单元/接口/评测逻辑测试（233 个用例）
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 
 # 本地端到端联调（需先启动后端）
@@ -256,7 +256,7 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 
 当前评测结果（报告均在 `docs/` 下，各自标注评测日期）：
 
-- 检索质量：Hit Rate 88.00%、MRR 0.8322（2026-08-07，`docs/eval_report.md`，达标；未达标领域 product 66.67%，改进计划见该报告）；另一份 2026-08-26 的检索对照为 Hit Rate 89.33%、MRR 0.8356（`docs/model_comparison_report.md`）。
+- 检索质量（现行）：Hit Rate 88.00%、MRR 0.8200（2026-10-22，`docs/eval_report.md`，达标；未达标领域 product 66.67%，改进计划见该报告）。上一版为 Hit Rate 88.00%、MRR 0.8322（2026-08-07，已存档于 `docs/eval_report_2026-08-07.md`）：两版之间《2025年度报告.md》做过 HTML→GFM 表格清洗并重灌（该篇 510→704 块、全库 671→865 块），索引构成不同，分领域数字不可直接比较（finance 93.33%→100%、common 93.33%→80% 的成因见该报告与 ADR 0010「单文档挤占」一节）。另有一份 2026-08-26 的检索对照 Hit Rate 89.33%、MRR 0.8356（`docs/model_comparison_report.md`，对应清洗前的索引，仅作历史对照）。
 - 订单结构化问答：答案正确率 95.24%、路由准确率 100%（2026-08-20，`docs/eval_orders_report.md`）。
 - 多模型对比：订单答案正确率 90.48%~100%、路由准确率 95.24%~100%、平均首 token 延迟 0.74s~14.84s（2026-08-26，`docs/model_comparison_report.md`）。
 
@@ -269,7 +269,8 @@ LLM 通过 `backend/llm.py` 中的**预设提供方注册表**管理，全部走
 - `项目开发文档-V2.0.md`：Stage 9~12 任务与验收标准（切片器与证据单元、会话与消息、增强模式后端与前端）
 - `CONTEXT.md`：领域词表
 - `docs/adr/`：架构决策记录（单一 Chroma Collection、增强模式、证据单元、双通道检索等）
-- `docs/golden_set.json` / `docs/eval_report.md`：Golden Set 与评测报告
+- `docs/golden_set.json` / `docs/eval_report.md`：Golden Set 与现行检索评测报告（2026-10-22）
+- `docs/eval_report_2026-08-07.md`：上一版检索评测报告存档（年报清洗前的索引，头部已加注数据/索引版本与可比性提示）
 - `docs/eval_orders_report.md` / `docs/model_comparison_report.md`：订单问答与多模型对比评测报告
 - `docs/stage8-local-e2e.md`：本地全流程联调报告
 
