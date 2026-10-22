@@ -34,7 +34,7 @@
   {"domain": "product", "question": "SC-100电池的标称容量是多少？", "answer_must_contain": ["120 Ah", "123 Ah"], "source_file": "SC-100_磷酸铁锂动力电池_规格书.md"},
   {"domain": "product", "question": "SC-100电池的标称电压是多少？", "answer_must_contain": ["3.20 V"], "source_file": "SC-100_磷酸铁锂动力电池_规格书.md"},
   {"domain": "product", "question": "SC-100电池的循环寿命是多少次？", "answer_must_contain": ["4000 次"], "source_file": "SC-100_磷酸铁锂动力电池_规格书.md"},
-  {"domain": "product", "question": "SC-100电池的单体能量密度（质量）是多少？", "answer_must_contain": ["165 Wh/kg"], "source_file": "SC-100_磷酸铁锂动力电池_规格书.md"},
+  {"domain": "product", "question": "SC-100电池的单体能量密度（质量）是多少？", "answer_must_contain": ["180 Wh/kg"], "source_file": "SC-100_磷酸铁锂动力电池_规格书.md"},
   {"domain": "product", "question": "SC-100乘用车应用的质保是什么？", "answer_must_contain": ["8 年或 16 万公里"], "source_file": "SC-100_磷酸铁锂动力电池_规格书.md"},
   {"domain": "product", "question": "SC-200电池的标称容量是多少？", "answer_must_contain": ["95 Ah"], "source_file": "SC-200_三元锂高能量密度电池_规格书.md"},
   {"domain": "product", "question": "SC-200电池的单体能量密度是多少？", "answer_must_contain": ["280 Wh/kg"], "source_file": "SC-200_三元锂高能量密度电池_规格书.md"},
